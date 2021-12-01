@@ -1,0 +1,15 @@
+{
+	"ServiceName": "AIS Core test",
+	"RunSchemes": [
+		{
+			"Type": "Continuous",
+			"TimeId": 1,
+			"Delay": "00:01:00"
+		},
+		{
+			"Type": "Continuous",
+			"TimeId": 2,
+			"Delay": "00:05:00"
+		}
+	]
+}
