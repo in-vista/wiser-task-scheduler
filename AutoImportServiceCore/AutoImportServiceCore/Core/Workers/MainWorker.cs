@@ -1,4 +1,6 @@
-﻿using System.Threading.Tasks;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.Options;
@@ -26,6 +28,15 @@ namespace AutoImportServiceCore.Core.Workers
         protected override async Task ExecuteActionAsync()
         {
             await mainService.ManageConfigurations();
+        }
+
+        /// <inheritdoc />
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            Console.WriteLine("Stopping all configuration workers.");
+            await mainService.StopAllConfigurations();
+            Console.WriteLine("All configuration workers have stopped.");
+            await base.StopAsync(cancellationToken);
         }
     }
 }

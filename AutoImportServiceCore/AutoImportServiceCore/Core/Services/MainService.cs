@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -16,14 +17,14 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
-        private readonly Dictionary<string, Dictionary<int, ConfigurationsWorker>> activeConfigurations;
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>> activeConfigurations;
 
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
         public MainService()
         {
-            activeConfigurations = new Dictionary<string, Dictionary<int, ConfigurationsWorker>>();
+            activeConfigurations = new ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>>();
         }
 
         /// <inheritdoc />
@@ -38,16 +39,36 @@ namespace AutoImportServiceCore.Core.Services
                     continue;
                 }
 
-                activeConfigurations.Add(configuration.ServiceName, new Dictionary<int, ConfigurationsWorker>());
+                activeConfigurations.TryAdd(configuration.ServiceName, new ConcurrentDictionary<int, ConfigurationsWorker>());
 
                 foreach (var runScheme in configuration.RunSchemes)
                 {
                     var worker = new ConfigurationsWorker($"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
                     var cancellationToken = new CancellationToken();
-                    var thread = new Thread(() => StartConfiguration(worker, cancellationToken));
-                    activeConfigurations[configuration.ServiceName].Add(runScheme.TimeId, worker);
-                    thread.Start();
+                    activeConfigurations[configuration.ServiceName].TryAdd(runScheme.TimeId, worker);
+                    await worker.StartAsync(cancellationToken);
                 }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task StopAllConfigurations()
+        {
+            List<Task> configurationStopTasks = new List<Task>();
+            var cancellationToken = new CancellationToken();
+
+            foreach (var configuration in activeConfigurations)
+            {
+                foreach (var worker in configuration.Value)
+                {
+                    configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
+                }
+            }
+            
+            for(var i = 0; i < configurationStopTasks.Count; i++)
+            {
+                await configurationStopTasks[i];
+                Console.WriteLine($"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
             }
         }
 
@@ -63,18 +84,6 @@ namespace AutoImportServiceCore.Core.Services
             configurations.Add(configuration);
 
             return configurations;
-        }
-
-        /// <summary>
-        /// Starts a new <see cref="ConfigurationsWorker"/> for the specified configuration and run scheme.
-        /// </summary>
-        /// <param name="name">The name of the worker.</param>
-        /// <param name="runScheme">The run scheme of the worker.</param>
-        private async void StartConfiguration(ConfigurationsWorker worker, CancellationToken cancellationToken)
-        {
-            await worker.StartAsync(cancellationToken);
-            await worker.ExecuteTask;
-            Console.WriteLine("Ended");
         }
     }
 }

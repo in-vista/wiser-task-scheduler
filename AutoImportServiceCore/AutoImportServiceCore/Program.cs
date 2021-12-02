@@ -5,6 +5,7 @@ using AutoImportServiceCore.Core.Workers;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;
+using Serilog;
 
 namespace AutoImportServiceCore
 {
@@ -19,10 +20,11 @@ namespace AutoImportServiceCore
             Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
+                    
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
                     ConfigureAisServices(services);
-                    
+                    services.AddLogging(builder => { builder.AddSerilog(); });
                 });
 
         private static void ConfigureSettings(IConfiguration configuration, IServiceCollection services)

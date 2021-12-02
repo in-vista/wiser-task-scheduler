@@ -12,5 +12,11 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// </summary>
         /// <returns></returns>
         Task ManageConfigurations();
+
+        /// <summary>
+        /// Stops all configurations that are currently running.
+        /// </summary>
+        /// <returns></returns>
+        Task StopAllConfigurations();
     }
 }

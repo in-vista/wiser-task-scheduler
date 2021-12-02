@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Workers
 {
@@ -50,19 +51,30 @@ namespace AutoImportServiceCore.Core.Workers
                 await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
             }
 
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
-                Console.WriteLine($"{Name} ran at: {DateTime.Now}");
-                var stopWatch = new Stopwatch();
-                stopWatch.Start();
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    Console.WriteLine($"{Name} ran at: {DateTime.Now}");
+                    var stopWatch = new Stopwatch();
+                    stopWatch.Start();
 
-                await ExecuteActionAsync();
+                    await ExecuteActionAsync();
 
-                stopWatch.Stop();
+                    stopWatch.Stop();
 
-                Console.WriteLine($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
+                    Console.WriteLine($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
 
-                await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
+                    await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                Console.WriteLine($"{Name} has been stopped after cancel was called.");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"{Name} stopped with exception {e}");
             }
         }
 
