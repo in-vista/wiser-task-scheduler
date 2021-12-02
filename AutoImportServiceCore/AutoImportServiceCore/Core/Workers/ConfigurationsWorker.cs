@@ -1,5 +1,6 @@
 ﻿using System.Threading.Tasks;
-using AutoImportServiceCore.Modules.RunSchemes.Models;
+using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Workers
 {
@@ -8,12 +9,10 @@ namespace AutoImportServiceCore.Core.Workers
     /// </summary>
     public class ConfigurationsWorker : BaseWorker
     {
-        /// <summary>
-        /// Creates a new instance of <see cref="ConfigurationsWorker"/>.
-        /// </summary>
-        /// <param name="name">The name of the worker.</param>
-        /// <param name="runScheme">The run scheme of the worker.</param>
-        public ConfigurationsWorker(string name, RunSchemeModel runScheme) : base(name, runScheme) {}
+        /// <inheritdoc />
+        public ConfigurationsWorker(ILogger<BaseWorker> logger) : base(logger)
+        {
+        }
 
         /// <inheritdoc />
         protected override async Task ExecuteActionAsync()

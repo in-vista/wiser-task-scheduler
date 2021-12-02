@@ -7,7 +7,11 @@ using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Workers;
+using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
+using AutoImportServiceCore.Modules.RunSchemes.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace AutoImportServiceCore.Core.Services
@@ -17,13 +21,23 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
+        private readonly IServiceProvider serviceProvider;
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>> activeConfigurations;
 
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService()
+        public MainService(IServiceProvider serviceProvider)
         {
+            this.serviceProvider = serviceProvider;
+            //var a = this.serviceProvider.GetRequiredService<ILogger<BaseWorker>>();
+            //var a = this.serviceProvider.GetRequiredService<IRunSchemesService>();
+
+            using (var scope = serviceProvider.CreateScope())
+            {
+                var a = scope.ServiceProvider.GetRequiredService<IRunSchemesService>();
+            }
+
             activeConfigurations = new ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>>();
         }
 
@@ -43,10 +57,8 @@ namespace AutoImportServiceCore.Core.Services
 
                 foreach (var runScheme in configuration.RunSchemes)
                 {
-                    var worker = new ConfigurationsWorker($"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
-                    var cancellationToken = new CancellationToken();
-                    activeConfigurations[configuration.ServiceName].TryAdd(runScheme.TimeId, worker);
-                    await worker.StartAsync(cancellationToken);
+                    var thread = new Thread(() => StartConfiguration(configuration.ServiceName, runScheme));
+                    thread.Start();
                 }
             }
         }
@@ -68,6 +80,7 @@ namespace AutoImportServiceCore.Core.Services
             for(var i = 0; i < configurationStopTasks.Count; i++)
             {
                 await configurationStopTasks[i];
+                configurationStopTasks[i].Dispose();
                 Console.WriteLine($"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
             }
         }
@@ -84,6 +97,32 @@ namespace AutoImportServiceCore.Core.Services
             configurations.Add(configuration);
 
             return configurations;
+        }
+
+        /// <summary>
+        /// Starts a new <see cref="ConfigurationsWorker"/> for the specified configuration and run scheme.
+        /// </summary>
+        /// <param name="name">The name of the worker.</param>
+        /// <param name="runScheme">The run scheme of the worker.</param>
+        private async void StartConfiguration(string name, RunSchemeModel runScheme)
+        {
+            using (var scope = serviceProvider.CreateScope())
+            {
+                var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
+                worker.Initialize($"{name} (Time id: {runScheme.TimeId})", runScheme);
+                activeConfigurations[name].TryAdd(runScheme.TimeId, worker);
+                await worker.StartAsync(new CancellationToken());
+                try
+                {
+                    await worker.ExecuteTask;
+                }
+                catch (TaskCanceledException)
+                {
+
+                }
+
+                Console.WriteLine("Ended");
+            }
         }
     }
 }

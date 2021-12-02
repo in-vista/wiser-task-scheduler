@@ -17,14 +17,21 @@ namespace AutoImportServiceCore.Core.Workers
         /// <summary>
         /// Gets the name of the worker.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; private set; }
 
         /// <summary>
         /// Gets the delay between two runs of the worker.
         /// </summary>
-        public RunSchemeModel RunScheme { get; }
+        public RunSchemeModel RunScheme { get; private set; }
 
-        private readonly bool runImmediately;
+        private bool RunImmediately { get; set; }
+
+        private readonly ILogger<BaseWorker> logger;
+
+        protected BaseWorker(ILogger<BaseWorker> logger)
+        {
+            this.logger = logger;
+        }
 
         /// <summary>
         /// Assigns the base values from a derived class.
@@ -32,11 +39,14 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
-        protected BaseWorker(string name, RunSchemeModel runScheme, bool runImmediately = false)
+        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false)
         {
+            if (!String.IsNullOrWhiteSpace(Name))
+                return;
+
             Name = name;
             RunScheme = runScheme;
-            this.runImmediately = runImmediately;
+            RunImmediately = runImmediately;
         }
 
         /// <summary>
@@ -46,7 +56,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <returns></returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (!runImmediately)
+            if (!RunImmediately)
             {
                 await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
             }
@@ -55,7 +65,7 @@ namespace AutoImportServiceCore.Core.Workers
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    Console.WriteLine($"{Name} ran at: {DateTime.Now}");
+                    logger.LogInformation($"{Name} ran at: {DateTime.Now}");
                     var stopWatch = new Stopwatch();
                     stopWatch.Start();
 
@@ -63,18 +73,18 @@ namespace AutoImportServiceCore.Core.Workers
 
                     stopWatch.Stop();
 
-                    Console.WriteLine($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
+                    logger.LogInformation($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
 
                     await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                Console.WriteLine($"{Name} has been stopped after cancel was called.");
+                logger.LogInformation($"{Name} has been stopped after cancel was called.");
             }
             catch (Exception e)
             {
-                Console.WriteLine($"{Name} stopped with exception {e}");
+                logger.LogError($"{Name} stopped with exception {e}");
             }
         }
 

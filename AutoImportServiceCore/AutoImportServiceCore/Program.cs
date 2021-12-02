@@ -2,6 +2,7 @@ using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
+using AutoImportServiceCore.Modules.RunSchemes.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;
@@ -20,7 +21,6 @@ namespace AutoImportServiceCore
             Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
-                    
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
                     ConfigureAisServices(services);
@@ -30,6 +30,8 @@ namespace AutoImportServiceCore
         private static void ConfigureSettings(IConfiguration configuration, IServiceCollection services)
         {
             services.Configure<AisSettings>(configuration.GetSection("Ais"));
+
+            services.AddScoped<ConfigurationsWorker>();
         }
 
         private static void ConfigureHostedServices(IServiceCollection services)
