@@ -56,13 +56,13 @@ namespace AutoImportServiceCore.Core.Workers
         /// <returns></returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (!RunImmediately)
-            {
-                await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
-            }
-
             try
             {
+                if (!RunImmediately)
+                {
+                    await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
+                }
+
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     logger.LogInformation($"{Name} ran at: {DateTime.Now}");

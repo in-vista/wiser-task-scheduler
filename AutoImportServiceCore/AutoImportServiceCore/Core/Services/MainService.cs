@@ -112,16 +112,7 @@ namespace AutoImportServiceCore.Core.Services
                 worker.Initialize($"{name} (Time id: {runScheme.TimeId})", runScheme);
                 activeConfigurations[name].TryAdd(runScheme.TimeId, worker);
                 await worker.StartAsync(new CancellationToken());
-                try
-                {
-                    await worker.ExecuteTask;
-                }
-                catch (TaskCanceledException)
-                {
-
-                }
-
-                Console.WriteLine("Ended");
+                await worker.ExecuteTask; // Keep scope alive until worker stops.
             }
         }
     }

@@ -1,12 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using AutoImportServiceCore.Modules.RunSchemes.Models;
 
 namespace AutoImportServiceCore.Modules.RunSchemes.Interfaces
 {
     public interface IRunSchemesService
     {
+        /// <summary>
+        /// Get the time the worker has to wait till it can start its next run.
+        /// </summary>
+        /// <param name="runScheme">The run scheme of the action.</param>
+        /// <returns></returns>
+        TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme);
     }
 }
