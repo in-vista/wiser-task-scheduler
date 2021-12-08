@@ -55,6 +55,7 @@ namespace AutoImportServiceCore.Core.Services
 
                 activeConfigurations.TryAdd(configuration.ServiceName, new ConcurrentDictionary<int, ConfigurationsWorker>());
 
+                // TODO check if time id already is used, do nothing if time ids are double.
                 foreach (var runScheme in configuration.RunSchemes)
                 {
                     var thread = new Thread(() => StartConfiguration(configuration.ServiceName, runScheme));
@@ -79,6 +80,7 @@ namespace AutoImportServiceCore.Core.Services
             
             for(var i = 0; i < configurationStopTasks.Count; i++)
             {
+                //TODO try catch voor dispose
                 await configurationStopTasks[i];
                 configurationStopTasks[i].Dispose();
                 Console.WriteLine($"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");

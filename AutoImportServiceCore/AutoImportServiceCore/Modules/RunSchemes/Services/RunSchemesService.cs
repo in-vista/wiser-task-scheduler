@@ -29,7 +29,7 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
                     nextDateTime = CalculateNextMonthlyDateTime(runScheme);
                     break;
                 default:
-                    throw new NotImplementedException();
+                    throw new ArgumentOutOfRangeException(nameof(runScheme.Type), runScheme.Type.ToString());
             }
 
             Console.WriteLine($"Time id {runScheme.TimeId} runs at: {nextDateTime}");
@@ -193,6 +193,7 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         {
             var daysToSkip = new HashSet<DayOfWeek>();
 
+            // TODO (JSON) array ipv string
             foreach (var day in runScheme.SkipDays.Split(","))
             {
                 if (int.TryParse(day, out var result) && result >= 0)
