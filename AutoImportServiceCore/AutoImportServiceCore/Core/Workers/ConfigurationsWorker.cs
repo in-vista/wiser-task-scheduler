@@ -1,5 +1,5 @@
 ﻿using System.Threading.Tasks;
-using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Workers
@@ -10,7 +10,7 @@ namespace AutoImportServiceCore.Core.Workers
     public class ConfigurationsWorker : BaseWorker
     {
         /// <inheritdoc />
-        public ConfigurationsWorker(ILogger<BaseWorker> logger) : base(logger)
+        public ConfigurationsWorker(ILogger<BaseWorker> logger, IRunSchemesService runSchemesService) : base(logger, runSchemesService)
         {
         }
 

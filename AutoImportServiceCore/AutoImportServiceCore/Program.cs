@@ -2,7 +2,6 @@ using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
-using AutoImportServiceCore.Modules.RunSchemes.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;

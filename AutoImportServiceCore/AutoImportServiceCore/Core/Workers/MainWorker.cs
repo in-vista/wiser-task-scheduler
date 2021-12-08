@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,7 +21,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// </summary>
         /// <param name="aisSettings">The settings of the AIS for the run scheme.</param>
         /// <param name="mainService"></param>
-        public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogger<BaseWorker> logger) : base(logger)
+        public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService) : base(logger, runSchemesService)
         {
             Initialize("Main", aisSettings.Value.MainRunScheme, true);
 

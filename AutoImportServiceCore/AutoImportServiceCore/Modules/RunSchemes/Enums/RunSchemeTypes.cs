@@ -6,8 +6,20 @@
     public enum RunSchemeTypes
     {
         /// <summary>
-        /// Run with a delay between two runs.
+        /// Have a delay between two runs.
         /// </summary>
-        Continuous
+        Continuous,
+        /// <summary>
+        /// Runs once a day.
+        /// </summary>
+        Daily,
+        /// <summary>
+        /// Runs once a week.
+        /// </summary>
+        Weekly,
+        /// <summary>
+        /// Runs once a month.
+        /// </summary>
+        Monthly
     }
 }

@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoImportServiceCore.Core.Helpers;
+using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -27,10 +27,12 @@ namespace AutoImportServiceCore.Core.Workers
         private bool RunImmediately { get; set; }
 
         private readonly ILogger<BaseWorker> logger;
+        private readonly IRunSchemesService runSchemesService;
 
-        protected BaseWorker(ILogger<BaseWorker> logger)
+        protected BaseWorker(ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
         {
             this.logger = logger;
+            this.runSchemesService = runSchemesService;
         }
 
         /// <summary>
@@ -60,7 +62,7 @@ namespace AutoImportServiceCore.Core.Workers
             {
                 if (!RunImmediately)
                 {
-                    await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
+                    await WaitTillNextRun(stoppingToken);
                 }
 
                 while (!stoppingToken.IsCancellationRequested)
@@ -75,7 +77,7 @@ namespace AutoImportServiceCore.Core.Workers
 
                     logger.LogInformation($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
 
-                    await Task.Delay(RunTimeHelpers.GetTimeTillNextRun(RunScheme.Delay), stoppingToken);
+                    await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
@@ -86,6 +88,31 @@ namespace AutoImportServiceCore.Core.Workers
             {
                 logger.LogError($"{Name} stopped with exception {e}");
             }
+        }
+
+        /// <summary>
+        /// Wait till the next run, if the time to wait is longer than the allowed delay the time is split and will wait in sections until the full time has completed.
+        /// </summary>
+        /// <param name="stoppingToken"></param>
+        /// <returns></returns>
+        private async Task WaitTillNextRun(CancellationToken stoppingToken)
+        {
+            bool timeSplit;
+
+            do
+            {
+                timeSplit = false;
+                var timeTillNextRun = runSchemesService.GetTimeTillNextRun(RunScheme);
+
+                if (timeTillNextRun.TotalMilliseconds > Int32.MaxValue)
+                {
+                    timeTillNextRun = new TimeSpan(0, 0, 0, 0, Int32.MaxValue);
+                    timeSplit = true;
+                }
+
+                await Task.Delay(timeTillNextRun, stoppingToken);
+
+            } while (timeSplit);
         }
 
         /// <summary>
