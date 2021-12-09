@@ -9,7 +9,7 @@
 			"TimeId": 1,
 			"Delay": "00:00:30",
 			"LogSettings": {
-				"LogMinimumLevel": "Error"
+				"LogMinimumLevel": "Information"
 			}
 		},
 		{
@@ -52,6 +52,30 @@
 			"Delay": "00:00:30",
 			"StartTime": "00:00:15",
 			"SkipDays": [2]
+		}
+	],
+	"Queries": [
+		{
+			"TimeId": 1,
+			"Order": 2
+		},
+		{
+			"TimeId": 1,
+			"Order": 1
+		},
+		{
+			"TimeId": 7,
+			"Order": 2,
+			"LogSettings": {
+				"LogRunStartAndStop": false,
+				"LogRunBody": false
+			}
+		}
+	],
+	"HttpApis": [
+		{
+			"TimeId": 7,
+			"Order": 1
 		}
 	]
 }

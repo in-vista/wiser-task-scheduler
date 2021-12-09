@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using AutoImportServiceCore.Modules.HttpApis.Models;
+using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 
 namespace AutoImportServiceCore.Core.Models
@@ -25,5 +27,15 @@ namespace AutoImportServiceCore.Core.Models
         /// Gets or sets the log settings.
         /// </summary>
         public LogSettings LogSettings { get; set; }
+
+        /// <summary>
+        /// Gets or sets the queries.
+        /// </summary>
+        public QueryModel[] Queries { get; set; }
+
+        /// <summary>
+        /// Gets or sets the HTTP APIs.
+        /// </summary>
+        public HttpApiModel[] HttpApis { get; set; }
     }
 }

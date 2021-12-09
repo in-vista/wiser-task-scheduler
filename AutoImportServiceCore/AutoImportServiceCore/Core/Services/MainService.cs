@@ -60,7 +60,7 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
 
-                    var thread = new Thread(() => StartConfiguration(configuration.ServiceName, runScheme));
+                    var thread = new Thread(() => StartConfiguration(runScheme, configuration));
                     thread.Start();
                 }
             }
@@ -124,15 +124,15 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Starts a new <see cref="ConfigurationsWorker"/> for the specified configuration and run scheme.
         /// </summary>
-        /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
-        private async void StartConfiguration(string name, RunSchemeModel runScheme)
+        /// <param name="configuration">The configuration the run scheme is within.</param>
+        private async void StartConfiguration(RunSchemeModel runScheme, ConfigurationModel configuration)
         {
             using (var scope = serviceProvider.CreateScope())
             {
                 var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
-                worker.Initialize($"{name} (Time id: {runScheme.TimeId})", runScheme);
-                activeConfigurations[name].TryAdd(runScheme.TimeId, worker);
+                worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
+                activeConfigurations[configuration.ServiceName].TryAdd(runScheme.TimeId, worker);
                 await worker.StartAsync(new CancellationToken());
                 await worker.ExecuteTask; // Keep scope alive until worker stops.
             }
