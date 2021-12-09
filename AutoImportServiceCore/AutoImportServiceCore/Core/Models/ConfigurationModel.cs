@@ -20,5 +20,10 @@ namespace AutoImportServiceCore.Core.Models
         /// </summary>
         [Required]
         public IEnumerable<RunSchemeModel> RunSchemes { get; set; }
+
+        /// <summary>
+        /// Gets or sets the log settings.
+        /// </summary>
+        public LogSettings LogSettings { get; set; }
     }
 }

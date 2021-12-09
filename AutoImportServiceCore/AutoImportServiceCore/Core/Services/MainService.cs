@@ -58,6 +58,8 @@ namespace AutoImportServiceCore.Core.Services
                 
                 foreach (var runScheme in configuration.RunSchemes)
                 {
+                    runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
+
                     var thread = new Thread(() => StartConfiguration(configuration.ServiceName, runScheme));
                     thread.Start();
                 }
@@ -128,8 +130,6 @@ namespace AutoImportServiceCore.Core.Services
         {
             using (var scope = serviceProvider.CreateScope())
             {
-                runScheme.LogSettings ??= LogSettings;
-
                 var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
                 worker.Initialize($"{name} (Time id: {runScheme.TimeId})", runScheme);
                 activeConfigurations[name].TryAdd(runScheme.TimeId, worker);

@@ -1,5 +1,8 @@
 {
 	"ServiceName": "AIS Core test",
+	"LogSettings": {
+		"LogRunBody": false
+	},
 	"RunSchemes": [
 		{
 			"Type": "Continuous",
@@ -48,7 +51,7 @@
 			"TimeId": 7,
 			"Delay": "00:00:30",
 			"StartTime": "00:00:15",
-			"SkipDays": [4]
+			"SkipDays": [2]
 		}
 	]
 }
