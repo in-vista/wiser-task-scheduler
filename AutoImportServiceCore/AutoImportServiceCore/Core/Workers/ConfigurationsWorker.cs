@@ -1,5 +1,5 @@
 ﻿using System.Threading.Tasks;
-using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
+using AutoImportServiceCore.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Workers
@@ -9,9 +9,16 @@ namespace AutoImportServiceCore.Core.Workers
     /// </summary>
     public class ConfigurationsWorker : BaseWorker
     {
-        /// <inheritdoc />
-        public ConfigurationsWorker(ILogger<BaseWorker> logger, IRunSchemesService runSchemesService) : base(logger, runSchemesService)
+        private readonly ILogger<ConfigurationsWorker> logger;
+
+        /// <summary>
+        /// Creates a new instance of <see cref="ConfigurationsWorker"/>.
+        /// </summary>
+        /// <param name="logger"></param>
+        /// <param name="baseWorkerDependencyAggregate"></param>
+        public ConfigurationsWorker(ILogger<ConfigurationsWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
+            this.logger = logger;
         }
 
         /// <inheritdoc />

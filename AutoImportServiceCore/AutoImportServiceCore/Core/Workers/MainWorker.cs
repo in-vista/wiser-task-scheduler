@@ -1,9 +1,9 @@
-﻿using System;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Enums;
+using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,17 +15,24 @@ namespace AutoImportServiceCore.Core.Workers
     public class MainWorker : BaseWorker
     {
         private readonly IMainService mainService;
+        private readonly ILogger<MainWorker> logger;
 
         /// <summary>
         /// Creates a new instance of <see cref="MainWorker"/>.
         /// </summary>
         /// <param name="aisSettings">The settings of the AIS for the run scheme.</param>
         /// <param name="mainService"></param>
-        public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService) : base(logger, runSchemesService)
+        /// <param name="logger"></param>
+        /// <param name="baseWorkerDependencyAggregate"></param>
+        public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
             Initialize("Main", aisSettings.Value.MainRunScheme, true);
+            RunScheme.LogSettings ??= new LogSettings();
 
             this.mainService = mainService;
+            this.logger = logger;
+
+            this.mainService.LogSettings = RunScheme.LogSettings;
         }
 
         /// <inheritdoc />
@@ -37,9 +44,9 @@ namespace AutoImportServiceCore.Core.Workers
         /// <inheritdoc />
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            Console.WriteLine("Stopping all configuration workers.");
+            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.");
             await mainService.StopAllConfigurations();
-            Console.WriteLine("All configuration workers have stopped.");
+            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.");
             await base.StopAsync(cancellationToken);
         }
     }

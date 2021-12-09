@@ -2,12 +2,14 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Enums;
+using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Workers;
-using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,21 +24,20 @@ namespace AutoImportServiceCore.Core.Services
     public class MainService : IMainService, ISingletonService
     {
         private readonly IServiceProvider serviceProvider;
+        private readonly ILogger<MainService> logger;
+
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>> activeConfigurations;
+
+        /// <inheritdoc />
+        public LogSettings LogSettings { get; set; }
 
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IServiceProvider serviceProvider)
+        public MainService(IServiceProvider serviceProvider, ILogger<MainService> logger)
         {
             this.serviceProvider = serviceProvider;
-            //var a = this.serviceProvider.GetRequiredService<ILogger<BaseWorker>>();
-            //var a = this.serviceProvider.GetRequiredService<IRunSchemesService>();
-
-            using (var scope = serviceProvider.CreateScope())
-            {
-                var a = scope.ServiceProvider.GetRequiredService<IRunSchemesService>();
-            }
+            this.logger = logger;
 
             activeConfigurations = new ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>>();
         }
@@ -54,8 +55,7 @@ namespace AutoImportServiceCore.Core.Services
                 }
 
                 activeConfigurations.TryAdd(configuration.ServiceName, new ConcurrentDictionary<int, ConfigurationsWorker>());
-
-                // TODO check if time id already is used, do nothing if time ids are double.
+                
                 foreach (var runScheme in configuration.RunSchemes)
                 {
                     var thread = new Thread(() => StartConfiguration(configuration.ServiceName, runScheme));
@@ -80,10 +80,9 @@ namespace AutoImportServiceCore.Core.Services
             
             for(var i = 0; i < configurationStopTasks.Count; i++)
             {
-                //TODO try catch voor dispose
                 await configurationStopTasks[i];
-                configurationStopTasks[i].Dispose();
-                Console.WriteLine($"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
+
+                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
             }
         }
 
@@ -96,7 +95,26 @@ namespace AutoImportServiceCore.Core.Services
             var configurations = new List<ConfigurationModel>();
 
             var configuration = JsonConvert.DeserializeObject<ConfigurationModel>(await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.json"));
-            configurations.Add(configuration);
+
+            // Check for duplicate run scheme time ids.
+            var runSchemeTimeIds = new List<int>();
+
+            foreach (var runScheme in configuration.RunSchemes)
+            {
+                runSchemeTimeIds.Add(runScheme.TimeId);
+            }
+
+            var duplicateTimeIds = runSchemeTimeIds.GroupBy(id => id).Where(id => id.Count() > 1).Select(id => id.Key).ToList();
+
+            // Only add configuration if no run scheme time ids are double.
+            if (duplicateTimeIds.Count == 0)
+            {
+                configurations.Add(configuration);
+            }
+            else
+            {
+                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start {configuration.ServiceName} due to duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}");
+            }
 
             return configurations;
         }
@@ -110,6 +128,8 @@ namespace AutoImportServiceCore.Core.Services
         {
             using (var scope = serviceProvider.CreateScope())
             {
+                runScheme.LogSettings ??= LogSettings;
+
                 var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
                 worker.Initialize($"{name} (Time id: {runScheme.TimeId})", runScheme);
                 activeConfigurations[name].TryAdd(runScheme.TimeId, worker);

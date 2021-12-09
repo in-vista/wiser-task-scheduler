@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
+using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Enums;
 
 namespace AutoImportServiceCore.Modules.RunSchemes.Models
@@ -44,7 +45,7 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Models
         /// <summary>
         /// Gets or sets what days need to be skipped.
         /// </summary>
-        public string SkipDays { get; set; } = String.Empty;
+        public int[] SkipDays { get; set; }
 
         /// <summary>
         /// Gets or sets the day of the week for <see cref="RunSchemeTypes"/>.Weekly.
@@ -60,5 +61,10 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Models
         /// Gets or sets the hour for <see cref="RunSchemeTypes"/>.Weekly and <see cref="RunSchemeTypes"/>.Monthly.
         /// </summary>
         public TimeSpan Hour { get; set; }
+
+        /// <summary>
+        /// Gets or sets the settings for the logger.
+        /// </summary>
+        public LogSettings LogSettings { get; set; }
     }
 }

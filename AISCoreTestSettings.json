@@ -4,12 +4,51 @@
 		{
 			"Type": "Continuous",
 			"TimeId": 1,
-			"Delay": "00:01:00"
+			"Delay": "00:00:30",
+			"LogSettings": {
+				"LogMinimumLevel": "Error"
+			}
 		},
 		{
 			"Type": "Continuous",
 			"TimeId": 2,
-			"Delay": "00:05:00"
+			"Delay": "00:01:00",
+			"SkipDays": [3,4,5],
+			"SkipWeekend": true
+		},
+		{
+			"Type": "Continuous",
+			"TimeId": 3,
+			"Delay": "24:00:00",
+			"StartTime": "17:00:00",
+			"SkipWeekend": true,
+			"SkipDays": [3,4]
+		},
+		{
+			"Type": "Monthly",
+			"TimeId": 4,
+			"DayOfMonth": 7,
+			"Hour": "17:00:00"
+		},
+		{
+			"Type": "Weekly",
+			"TimeId": 5,
+			"DayOfWeek": 2,
+			"Hour": "14:15:00"
+		},
+		{
+			"Type": "Daily",
+			"TimeId": 6,
+			"Hour": "16:30:00",
+			"SkipDays": [4,3,7],
+			"SkipWeekend": true
+		},
+		{
+			"Type": "Continuous",
+			"TimeId": 7,
+			"Delay": "00:00:30",
+			"StartTime": "00:00:15",
+			"SkipDays": [4]
 		}
 	]
 }

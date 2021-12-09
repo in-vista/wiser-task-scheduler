@@ -2,6 +2,9 @@
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Enums;
+using AutoImportServiceCore.Core.Helpers;
+using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using Microsoft.Extensions.Hosting;
@@ -29,10 +32,14 @@ namespace AutoImportServiceCore.Core.Workers
         private readonly ILogger<BaseWorker> logger;
         private readonly IRunSchemesService runSchemesService;
 
-        protected BaseWorker(ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
+        /// <summary>
+        /// Creates a new instance of <see cref="BaseWorker"/>.
+        /// </summary>
+        /// <param name="baseWorkerDependencyAggregate"></param>
+        protected BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate)
         {
-            this.logger = logger;
-            this.runSchemesService = runSchemesService;
+            logger = baseWorkerDependencyAggregate.Logger;
+            runSchemesService = baseWorkerDependencyAggregate.RunSchemesService;
         }
 
         /// <summary>
@@ -60,6 +67,8 @@ namespace AutoImportServiceCore.Core.Workers
         {
             try
             {
+                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}");
+
                 if (!RunImmediately)
                 {
                     await WaitTillNextRun(stoppingToken);
@@ -67,7 +76,8 @@ namespace AutoImportServiceCore.Core.Workers
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    logger.LogInformation($"{Name} ran at: {DateTime.Now}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} ran at: {DateTime.Now}");
+
                     var stopWatch = new Stopwatch();
                     stopWatch.Start();
 
@@ -75,18 +85,18 @@ namespace AutoImportServiceCore.Core.Workers
 
                     stopWatch.Stop();
 
-                    logger.LogInformation($"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
 
                     await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                logger.LogInformation($"{Name} has been stopped after cancel was called.");
+                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.");
             }
             catch (Exception e)
             {
-                logger.LogError($"{Name} stopped with exception {e}");
+                LogHelper.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}");
             }
         }
 

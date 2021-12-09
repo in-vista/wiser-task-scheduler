@@ -11,5 +11,12 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Interfaces
         /// <param name="runScheme">The run scheme of the action.</param>
         /// <returns></returns>
         TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme);
+
+        /// <summary>
+        /// Get the date and time when the worker will perform its next run.
+        /// </summary>
+        /// <param name="runScheme">The run scheme of the action.</param>
+        /// <returns></returns>
+        DateTime GetDateTimeTillNextRun(RunSchemeModel runScheme);
     }
 }

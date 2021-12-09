@@ -1,4 +1,6 @@
 ﻿using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.RunSchemes.Models;
 
 namespace AutoImportServiceCore.Core.Interfaces
 {
@@ -7,6 +9,11 @@ namespace AutoImportServiceCore.Core.Interfaces
     /// </summary>
     public interface IMainService
     {
+        /// <summary>
+        /// Gets or sets the logger settings that the Main service needs to use.
+        /// </summary>
+        LogSettings LogSettings { get; set; }
+
         /// <summary>
         /// Manage the AIS configurations.
         /// </summary>

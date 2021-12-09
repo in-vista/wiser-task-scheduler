@@ -12,28 +12,25 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         /// <inheritdoc />
         public TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme)
         {
-            var nextDateTime = DateTime.MaxValue;
+            return GetDateTimeTillNextRun(runScheme) - DateTime.Now;
+        }
 
+        /// <inheritdoc />
+        public DateTime GetDateTimeTillNextRun(RunSchemeModel runScheme)
+        {
             switch (runScheme.Type)
             {
                 case RunSchemeTypes.Continuous:
-                    nextDateTime = CalculateNextDelayedDateTime(runScheme);
-                    break;
+                    return CalculateNextDelayedDateTime(runScheme);
                 case RunSchemeTypes.Daily:
-                    nextDateTime = CalculateNextDailyDateTime(runScheme);
-                    break;
+                    return CalculateNextDailyDateTime(runScheme);
                 case RunSchemeTypes.Weekly:
-                    nextDateTime = CalculateNextWeeklyDateTime(runScheme);
-                    break;
+                    return CalculateNextWeeklyDateTime(runScheme);
                 case RunSchemeTypes.Monthly:
-                    nextDateTime = CalculateNextMonthlyDateTime(runScheme);
-                    break;
+                    return CalculateNextMonthlyDateTime(runScheme);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(runScheme.Type), runScheme.Type.ToString());
             }
-
-            Console.WriteLine($"Time id {runScheme.TimeId} runs at: {nextDateTime}");
-            return nextDateTime - DateTime.Now;
         }
 
         /// <summary>
@@ -104,13 +101,15 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         {
             var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, Math.Min(runScheme.DayOfMonth, DateTime.DaysInMonth(DateTime.Now.Year, DateTime.Now.Month)), runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
 
-            if (nextDateTime < DateTime.Now)
+            if (nextDateTime >= DateTime.Now)
             {
-                nextDateTime = nextDateTime.AddMonths(1);
-                if (nextDateTime.Day < runScheme.DayOfMonth)
-                {
-                    nextDateTime = nextDateTime.AddDays(DateTime.DaysInMonth(nextDateTime.Year, nextDateTime.Month) - nextDateTime.Day);
-                }
+                return nextDateTime;
+            }
+
+            nextDateTime = nextDateTime.AddMonths(1);
+            if (nextDateTime.Day < runScheme.DayOfMonth)
+            {
+                nextDateTime = nextDateTime.AddDays(DateTime.DaysInMonth(nextDateTime.Year, nextDateTime.Month) - nextDateTime.Day);
             }
 
             return nextDateTime;
@@ -126,12 +125,14 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         {
             var daysToSkip = GetDaysToSkip(runScheme);
 
-            if (daysToSkip.Count > 0)
+            if (daysToSkip.Count <= 0)
             {
-                while(daysToSkip.Contains(nextDateTime.DayOfWeek) || runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16)
-                {
-                    nextDateTime = nextDateTime.AddDays(1);
-                }
+                return nextDateTime;
+            }
+
+            while(daysToSkip.Contains(nextDateTime.DayOfWeek) || runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16)
+            {
+                nextDateTime = nextDateTime.AddDays(1);
             }
 
             return nextDateTime;
@@ -145,15 +146,17 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         /// <returns></returns>
         private DateTime SetupStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
         {
-            if (runScheme.StartTime != runScheme.StopTime)
+            if (runScheme.StartTime == runScheme.StopTime)
             {
-                nextDateTime = nextDateTime.AddSeconds(runScheme.StartTime.TotalSeconds);
+                return nextDateTime;
+            }
+
+            nextDateTime = nextDateTime.AddSeconds(runScheme.StartTime.TotalSeconds);
                 
-                // Start yesterday if the current start time has not been passed when the start time is later than the stop time.
-                if (runScheme.StartTime > runScheme.StopTime && DateTime.Now.TimeOfDay < runScheme.StartTime)
-                {
-                    nextDateTime = nextDateTime.AddDays(-1);
-                }
+            // Start yesterday if the current start time has not been passed when the start time is later than the stop time.
+            if (runScheme.StartTime > runScheme.StopTime && DateTime.Now.TimeOfDay < runScheme.StartTime)
+            {
+                nextDateTime = nextDateTime.AddDays(-1);
             }
 
             return nextDateTime;
@@ -167,18 +170,20 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         /// <returns></returns>
         private DateTime ForceStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
         {
-            if (runScheme.StartTime != runScheme.StopTime)
+            if (runScheme.StartTime == runScheme.StopTime)
             {
-                // Start tomorrow if the stop time has been passed and the start time is earlier than the stop time.
-                if (runScheme.StartTime < runScheme.StopTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
-                {
-                    nextDateTime = nextDateTime.Date.AddDays(1).AddSeconds(runScheme.StartTime.TotalSeconds);
-                }
-                // Start at the start time if the current start time is between the stop and start time.
-                else if (runScheme.StartTime > runScheme.StopTime && nextDateTime.TimeOfDay < runScheme.StartTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
-                {
-                    nextDateTime = nextDateTime.Date.AddSeconds(runScheme.StartTime.TotalSeconds);
-                }
+                return nextDateTime;
+            }
+
+            // Start tomorrow if the stop time has been passed and the start time is earlier than the stop time.
+            if (runScheme.StartTime < runScheme.StopTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
+            {
+                nextDateTime = nextDateTime.Date.AddDays(1).AddSeconds(runScheme.StartTime.TotalSeconds);
+            }
+            // Start at the start time if the current start time is between the stop and start time.
+            else if (runScheme.StartTime > runScheme.StopTime && nextDateTime.TimeOfDay < runScheme.StartTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
+            {
+                nextDateTime = nextDateTime.Date.AddSeconds(runScheme.StartTime.TotalSeconds);
             }
 
             return nextDateTime;
@@ -193,20 +198,23 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Services
         {
             var daysToSkip = new HashSet<DayOfWeek>();
 
-            // TODO (JSON) array ipv string
-            foreach (var day in runScheme.SkipDays.Split(","))
+            if (runScheme.SkipDays == null)
             {
-                if (int.TryParse(day, out var result) && result >= 0)
-                {
-                    daysToSkip.Add((DayOfWeek)(result % 7));
-                }
+                return daysToSkip;
             }
 
-            if (runScheme.SkipWeekend)
+            foreach (var day in runScheme.SkipDays)
             {
-                daysToSkip.Add(DayOfWeek.Saturday);
-                daysToSkip.Add(DayOfWeek.Sunday);
+                    daysToSkip.Add((DayOfWeek)(day % 7));
             }
+
+            if (!runScheme.SkipWeekend)
+            {
+                return daysToSkip;
+            }
+
+            daysToSkip.Add(DayOfWeek.Saturday);
+            daysToSkip.Add(DayOfWeek.Sunday);
 
             return daysToSkip;
         }
