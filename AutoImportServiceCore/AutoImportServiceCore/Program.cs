@@ -1,4 +1,5 @@
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
@@ -29,8 +30,6 @@ namespace AutoImportServiceCore
         private static void ConfigureSettings(IConfiguration configuration, IServiceCollection services)
         {
             services.Configure<AisSettings>(configuration.GetSection("Ais"));
-
-            services.AddScoped<ConfigurationsWorker>();
         }
 
         private static void ConfigureHostedServices(IServiceCollection services)
@@ -40,6 +39,9 @@ namespace AutoImportServiceCore
 
         private static void ConfigureAisServices(IServiceCollection services)
         {
+            services.AddScoped<ConfigurationsWorker>();
+            services.AddScoped<AisDatabaseConnection>();
+
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
                 // We start out with all types in the current assembly.

@@ -11,6 +11,9 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Services
 {
+    /// <summary>
+    /// A service for a configuration.
+    /// </summary>
     public class ConfigurationsService : IConfigurationsService, IScopedService
     {
         private readonly ILogger<ConfigurationsService> logger;
@@ -51,7 +54,9 @@ namespace AutoImportServiceCore.Core.Services
 
                 if (!actionsServices.ContainsKey(action.GetType().ToString()))
                 {
-                    actionsServices.Add(action.GetType().ToString(), actionsServiceFactory.GetActionsServiceForAction(action));
+                    var actionsService = actionsServiceFactory.GetActionsServiceForAction(action);
+                    actionsService.Initialize(configuration);
+                    actionsServices.Add(action.GetType().ToString(), actionsService);
                 }
             }
 
@@ -129,9 +134,16 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task ExecuteAsync()
         {
+            var resultSets = new Dictionary<string, Dictionary<string, SortedDictionary<int, string>>>();
+
             foreach (var action in actions)
             {
-                await actionsServices[action.Value.GetType().ToString()].Execute(action.Value);
+                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, String.IsNullOrWhiteSpace(action.Value.UseResultSet) ? null : resultSets[action.Value.UseResultSet]);
+
+                if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
+                {
+                    resultSets.Add(action.Value.ResultSetName, resultSet);
+                }
             }
         }
     }

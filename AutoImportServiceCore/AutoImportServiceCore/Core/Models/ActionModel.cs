@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace AutoImportServiceCore.Core.Models
 {
@@ -18,6 +19,16 @@ namespace AutoImportServiceCore.Core.Models
         /// </summary>
         [Required]
         public int Order { get; set; }
+
+        /// <summary>
+        /// Gets or sets the name of the result set.
+        /// </summary>
+        public string ResultSetName { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Gets or sets the result set to use for replacements.
+        /// </summary>
+        public string UseResultSet { get; set; } = String.Empty;
 
         /// <summary>
         /// Gets or sets the log settings that apply to the action.

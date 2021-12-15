@@ -18,6 +18,11 @@ namespace AutoImportServiceCore.Core.Models
         public string ServiceName { get; set; }
 
         /// <summary>
+        /// Gets or sets the connection string that is used for queries.
+        /// </summary>
+        public string ConnectionString { get; set; }
+
+        /// <summary>
         /// Gets or sets the run scheme.
         /// </summary>
         [Required]

@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
@@ -27,11 +28,19 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         }
 
         /// <inheritdoc />
-        public async Task Execute(ActionModel action)
+        public async Task Initialize(ConfigurationModel configuration)
+        {
+
+        }
+
+        /// <inheritdoc />
+        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, SortedDictionary<int, string>> usingResultSet)
         {
             var httpApi = action as HttpApiModel;
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
+
+            return null;
         }
     }
 }
