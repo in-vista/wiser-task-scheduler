@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
@@ -41,10 +42,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public void ExtractActionsFromConfiguration(int timeId, ConfigurationModel configuration)
         {
-            var allActions = GetAllActionsFromConfiguration(
-                configuration.Queries.ToArray<ActionModel>(),
-                configuration.HttpApis.ToArray<ActionModel>()
-                );
+            var allActions = GetAllActionsFromConfiguration(configuration);
 
             foreach (ActionModel action in allActions.Where(action => action.TimeId == timeId))
             {
@@ -63,10 +61,15 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Get all the provided action sets if they exist in a single list.
         /// </summary>
-        /// <param name="actionSets">The action sets to combine.</param>
         /// <returns></returns>
-        private List<ActionModel> GetAllActionsFromConfiguration(params ActionModel[][] actionSets)
+        private List<ActionModel> GetAllActionsFromConfiguration(ConfigurationModel configuration)
         {
+            var actionSets = new List<ActionModel[]>
+            {
+                configuration.Queries.ToArray<ActionModel>(),
+                configuration.HttpApis.ToArray<ActionModel>()
+            };
+
             var allActions = new List<ActionModel>();
 
             if (actions == null)
@@ -83,6 +86,44 @@ namespace AutoImportServiceCore.Core.Services
             }
 
             return allActions;
+        }
+
+        /// <inheritdoc />
+        public bool IsValidConfiguration(ConfigurationModel configuration)
+        {
+            var conflicts = 0;
+
+            // Check for duplicate run scheme time ids.
+            var runSchemeTimeIds = new List<int>();
+
+            foreach (var runScheme in configuration.RunSchemes)
+            {
+                runSchemeTimeIds.Add(runScheme.TimeId);
+            }
+
+            var duplicateTimeIds = runSchemeTimeIds.GroupBy(id => id).Where(id => id.Count() > 1).Select(id => id.Key).ToList();
+
+            if (duplicateTimeIds.Count > 0)
+            {
+                conflicts++;
+                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}");
+            }
+
+            // Check for duplicate order in a single time id.
+            var allActions = GetAllActionsFromConfiguration(configuration);
+
+            foreach (var timeId in runSchemeTimeIds)
+            {
+                var duplicateOrders = allActions.Where(action => action.TimeId == timeId).GroupBy(action => action.Order).Where(action => action.Count() > 1).Select(action => action.Key).ToList();
+
+                if (duplicateOrders.Count > 0)
+                {
+                    conflicts++;
+                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}");
+                }
+            }
+
+            return conflicts == 0;
         }
 
         /// <inheritdoc />

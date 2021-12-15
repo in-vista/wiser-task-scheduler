@@ -26,6 +26,13 @@ namespace AutoImportServiceCore.Core.Interfaces
         void ExtractActionsFromConfiguration(int timeId, ConfigurationModel configuration);
 
         /// <summary>
+        /// Check if a configuration is valid, if there are conflicts in the configuration it will be invalid.
+        /// </summary>
+        /// <param name="configuration">The configuration to validate.</param>
+        /// <returns></returns>
+        bool IsValidConfiguration(ConfigurationModel configuration);
+
+        /// <summary>
         /// Execute all actions that have been extracted from the configuration from the time id.
         /// </summary>
         /// <returns></returns>

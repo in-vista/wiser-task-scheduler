@@ -98,24 +98,20 @@ namespace AutoImportServiceCore.Core.Services
 
             var configuration = JsonConvert.DeserializeObject<ConfigurationModel>(await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.json"));
 
-            // Check for duplicate run scheme time ids.
-            var runSchemeTimeIds = new List<int>();
-
-            foreach (var runScheme in configuration.RunSchemes)
+            using (var scope = serviceProvider.CreateScope())
             {
-                runSchemeTimeIds.Add(runScheme.TimeId);
-            }
+                var configurationsService = scope.ServiceProvider.GetRequiredService<IConfigurationsService>();
+                configurationsService.LogSettings = LogSettings;
 
-            var duplicateTimeIds = runSchemeTimeIds.GroupBy(id => id).Where(id => id.Count() > 1).Select(id => id.Key).ToList();
-
-            // Only add configuration if no run scheme time ids are double.
-            if (duplicateTimeIds.Count == 0)
-            {
-                configurations.Add(configuration);
-            }
-            else
-            {
-                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start {configuration.ServiceName} due to duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}");
+                // Only add configurations to run when they are valid.
+                if (configurationsService.IsValidConfiguration(configuration))
+                {
+                    configurations.Add(configuration);
+                }
+                else
+                {
+                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
+                }
             }
 
             return configurations;
