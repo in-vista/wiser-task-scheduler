@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
@@ -10,7 +9,6 @@ using AutoImportServiceCore.Core.Services;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Core.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Modules.Queries.Services
@@ -55,36 +53,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 return await databaseConnection.ExecuteQuery(connectionString, query.Query);
             }
 
-            var queryString = query.Query;
-            var parameterKeys = new List<string>();
-
-            // Find all the replacement keys and replace them with ?key.
-            while (queryString.Contains("[{") && queryString.Contains("}]"))
-            {
-                var startIndex = queryString.IndexOf("[{") + 2;
-                var endIndex = queryString.IndexOf("}]");
-
-                var key = queryString.Substring(startIndex, endIndex - startIndex);
-
-                if (key.Contains("[]"))
-                {
-                    key = key.Replace("[]", "");
-
-                    var values = new List<string>();
-
-                    for (var i = 1; i <= usingResultSet[key].Count; i++)
-                    {
-                        values.Add(usingResultSet[key][i].ToMySqlSafeValue());
-                    }
-
-                    queryString = queryString.Replace($"[{{{key}[]}}]", String.Join(",", values));
-                }
-                else
-                {
-                    queryString = queryString.Replace($"[{{{key}}}]", $"?{key}");
-                    parameterKeys.Add(key);
-                }
-            }
+            var tuple = ReplacementHelper.PrepareText(query.Query, usingResultSet, mySqlSafe: true);
+            var queryString = tuple.Item1;
+            var parameterKeys = tuple.Item2;
 
             // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
             if (parameterKeys.Count == 0)
@@ -95,18 +66,12 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             // Perform the query for each row in the result set that is being used.
             for (var i = 1; i <= usingResultSet.First().Value.Count; i++)
             {
-                var queryStringWithValues = queryString;
-
-                // Replacing the parameters with the required values of the current row. Replacing with database safe string to allow parameters in strings.
-                foreach (var key in parameterKeys)
-                {
-                    queryStringWithValues = queryStringWithValues.Replace($"?{key}", usingResultSet[key][i].ToMySqlSafeValue());
-                }
+                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, usingResultSet, mySqlSafe: true);
 
                 await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues);
             }
 
-            // TODO combine result sets from each row.
+            // TODO? combine result sets from each row.
             return new Dictionary<string, SortedDictionary<int, string>>();
         }
     }

@@ -56,35 +56,9 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             if (httpApi.Body != null)
             {
-                var body = httpApi.Body.Body;
-                var parameterKeys = new List<string>();
-
-                while (body.Contains("[{") && body.Contains("}]"))
-                {
-                    var startIndex = body.IndexOf("[{") + 2;
-                    var endIndex = body.IndexOf("}]");
-
-                    var key = body.Substring(startIndex, endIndex - startIndex);
-
-                    if (key.Contains("[]"))
-                    {
-                        key = key.Replace("[]", "");
-
-                        var values = new List<string>();
-
-                        for (var i = 1; i <= usingResultSet[key].Count; i++)
-                        {
-                            values.Add(usingResultSet[key][i]);
-                        }
-
-                        body = body.Replace($"[{{{key}[]}}]", String.Join(",", values));
-                    }
-                    else
-                    {
-                        body = body.Replace($"[{{{key}}}]", $"?{key}");
-                        parameterKeys.Add(key);
-                    }
-                }
+                var tuple = ReplacementHelper.PrepareText(httpApi.Body.Body, usingResultSet);
+                var body = tuple.Item1;
+                var parameterKeys = tuple.Item2;
 
                 if (usingResultSet != null && parameterKeys.Count > 0)
                 {
@@ -92,11 +66,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     {
                         if (usingResultSet.First().Value.Count > 0)
                         {
-                            // Replacing the parameters with the required values of the first row.
-                            foreach (var key in parameterKeys)
-                            {
-                                body = body.Replace($"?{key}", usingResultSet[key][1]);
-                            }
+                            body = ReplacementHelper.ReplaceText(body, 1, parameterKeys, usingResultSet);
                         }
                     }
                     else
@@ -106,18 +76,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                         // Perform the query for each row in the result set that is being used.
                         for (var i = 1; i <= usingResultSet.First().Value.Count; i++)
                         {
-                            var bodyWithValues = body;
-
-                            // Replacing the parameters with the required values of the current row. Replacing with database safe string to allow parameters in strings.
-                            foreach (var key in parameterKeys)
-                            {
-                                bodyWithValues = bodyWithValues.Replace($"?{key}", usingResultSet[key][i]);
-                            }
-
+                            var bodyWithValues = ReplacementHelper.ReplaceText(body, i, parameterKeys, usingResultSet);
                             bodyCollection.Append($"{(i > 1 ? "," : "")}{bodyWithValues}");
                         }
 
-                        body = $"[{bodyCollection.ToString()}]";
+                        body = $"[{bodyCollection}]";
                     }
                 }
 
@@ -129,7 +92,6 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             using var client = new HttpClient();
             var response = await client.SendAsync(request);
-            Console.WriteLine($"Status: {response.StatusCode}, Body: {await response.Content.ReadAsStringAsync()}");
 
             resultSet.Add("StatusCode", new SortedDictionary<int, string>() {{1, ((int) response.StatusCode).ToString()}});
 
