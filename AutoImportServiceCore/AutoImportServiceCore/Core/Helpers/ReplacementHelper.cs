@@ -15,8 +15,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="originalString">The string to prepare.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
+        /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static Tuple<string, List<string>> PrepareText(string originalString, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false)
+        public static Tuple<string, List<string>> PrepareText(string originalString, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
         {
             var result = originalString;
             var parameterKeys = new List<string>();
@@ -36,7 +37,7 @@ namespace AutoImportServiceCore.Core.Helpers
 
                     for (var i = 1; i <= usingResultSet[key].Count; i++)
                     {
-                        values.Add(GetValue(key, i, usingResultSet, mySqlSafe));
+                        values.Add(GetValue(key, i, usingResultSet, mySqlSafe, htmlEncode));
                     }
 
                     result = result.Replace($"[{{{key}[]}}]", String.Join(",", values));
@@ -59,14 +60,15 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="parameterKeys">The keys of the parameters to replace.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
+        /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false)
+        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
         {
             var result = originalString;
             
             foreach (var key in parameterKeys)
             {
-                result = result.Replace($"?{key}", GetValue(key, row, usingResultSet, mySqlSafe));
+                result = result.Replace($"?{key}", GetValue(key, row, usingResultSet, mySqlSafe, htmlEncode));
             }
 
             return result;
@@ -78,15 +80,21 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="key">The key to get the value from.</param>
         /// <param name="row">The row to get the value from.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
-        /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
+        /// <param name="mySqlSafe">If the value from the result set needs to be safe for MySQL.</param>
+        /// <param name="htmlEncode">If the value from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        private static string GetValue(string key, int row, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe)
+        private static string GetValue(string key, int row, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe, bool htmlEncode)
         {
             var value = usingResultSet[key][row];
 
             if (mySqlSafe)
             {
                 value = value.ToMySqlSafeValue();
+            }
+
+            if (htmlEncode)
+            {
+                value = value.HtmlEncode();
             }
 
             return value;

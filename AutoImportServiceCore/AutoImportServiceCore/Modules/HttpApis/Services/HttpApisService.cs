@@ -47,7 +47,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}, url: {httpApi.Url}, method: {httpApi.Method}");
 
-            var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), httpApi.Url);
+            var tuple = ReplacementHelper.PrepareText(httpApi.Url, usingResultSet, htmlEncode: true);
+            var url = tuple.Item1;
+            var parameterKeys = tuple.Item2;
+
+            var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), ReplacementHelper.ReplaceText(url, 1, parameterKeys, usingResultSet, htmlEncode: true));
 
             foreach (var header in httpApi.Headers)
             {
@@ -56,9 +60,9 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             if (httpApi.Body != null)
             {
-                var tuple = ReplacementHelper.PrepareText(httpApi.Body.Body, usingResultSet);
+                tuple = ReplacementHelper.PrepareText(httpApi.Body.Body, usingResultSet);
                 var body = tuple.Item1;
-                var parameterKeys = tuple.Item2;
+                parameterKeys = tuple.Item2;
 
                 if (usingResultSet != null && parameterKeys.Count > 0)
                 {
