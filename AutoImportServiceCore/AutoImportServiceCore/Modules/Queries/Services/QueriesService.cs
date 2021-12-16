@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
@@ -58,14 +59,37 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var parameterKeys = new List<string>();
 
             // Find all the replacement keys and replace them with ?key.
-            while (queryString.Contains("{") && queryString.Contains("}"))
+            while (queryString.Contains("[{") && queryString.Contains("}]"))
             {
-                var startIndex = queryString.IndexOf("{") + 1;
-                var endIndex = queryString.IndexOf("}");
+                var startIndex = queryString.IndexOf("[{") + 2;
+                var endIndex = queryString.IndexOf("}]");
 
                 var key = queryString.Substring(startIndex, endIndex - startIndex);
-                queryString = queryString.Replace($"{{{key}}}", $"?{key}");
-                parameterKeys.Add(key);
+
+                if (key.Contains("[]"))
+                {
+                    key = key.Replace("[]", "");
+
+                    var values = new List<string>();
+
+                    for (var i = 1; i <= usingResultSet[key].Count; i++)
+                    {
+                        values.Add(usingResultSet[key][i].ToMySqlSafeValue());
+                    }
+
+                    queryString = queryString.Replace($"[{{{key}[]}}]", String.Join(",", values));
+                }
+                else
+                {
+                    queryString = queryString.Replace($"[{{{key}}}]", $"?{key}");
+                    parameterKeys.Add(key);
+                }
+            }
+
+            // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
+            if (parameterKeys.Count == 0)
+            {
+                return await databaseConnection.ExecuteQuery(connectionString, queryString);
             }
 
             // Perform the query for each row in the result set that is being used.
