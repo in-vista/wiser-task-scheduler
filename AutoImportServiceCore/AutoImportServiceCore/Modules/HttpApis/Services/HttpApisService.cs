@@ -60,35 +60,33 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             if (httpApi.Body != null)
             {
-                tuple = ReplacementHelper.PrepareText(httpApi.Body.Body, usingResultSet);
-                var body = tuple.Item1;
-                parameterKeys = tuple.Item2;
+                var finalBody = new StringBuilder();
 
-                if (usingResultSet != null && parameterKeys.Count > 0)
+                foreach (var bodyPart in httpApi.Body.BodyParts)
                 {
-                    if (httpApi.Body.SingleItem)
+                    tuple = ReplacementHelper.PrepareText(bodyPart.Text, usingResultSet);
+                    var body = tuple.Item1;
+                    parameterKeys = tuple.Item2;
+
+                    if (usingResultSet != null && parameterKeys.Count > 0)
                     {
-                        if (usingResultSet.First().Value.Count > 0)
+                        if (bodyPart.SingleItem)
                         {
-                            body = ReplacementHelper.ReplaceText(body, 1, parameterKeys, usingResultSet);
+                            if (usingResultSet.First().Value.Count > 0)
+                            {
+                                body = ReplacementHelper.ReplaceText(body, 1, parameterKeys, usingResultSet);
+                            }
+                        }
+                        else
+                        {
+                            body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, usingResultSet);
                         }
                     }
-                    else
-                    {
-                        var bodyCollection = new StringBuilder();
 
-                        // Perform the query for each row in the result set that is being used.
-                        for (var i = 1; i <= usingResultSet.First().Value.Count; i++)
-                        {
-                            var bodyWithValues = ReplacementHelper.ReplaceText(body, i, parameterKeys, usingResultSet);
-                            bodyCollection.Append($"{(i > 1 ? "," : "")}{bodyWithValues}");
-                        }
-
-                        body = $"[{bodyCollection}]";
-                    }
+                    finalBody.Append(body);
                 }
 
-                request.Content = new StringContent(body)
+                request.Content = new StringContent(finalBody.ToString())
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
                 };
@@ -127,6 +125,35 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             resultSet.Add("Body", new SortedDictionary<int, string>() {{1, await response.Content.ReadAsStringAsync()}});
 
             return resultSet;
+        }
+
+        private string GenerateBodyCollection(string body, string contentType, List<string> parameterKeys, Dictionary<string, SortedDictionary<int, string>> usingResultSet)
+        {
+            var separator = String.Empty;
+
+            switch (contentType)
+            {
+                case "application/json":
+                    separator = ",";
+                    break;
+            }
+
+            var bodyCollection = new StringBuilder();
+
+            // Perform the query for each row in the result set that is being used.
+            for (var i = 1; i <= usingResultSet.First().Value.Count; i++)
+            {
+                var bodyWithValues = ReplacementHelper.ReplaceText(body, i, parameterKeys, usingResultSet);
+                bodyCollection.Append($"{(i > 1 ? separator : "")}{bodyWithValues}");
+            }
+
+            switch (contentType)
+            {
+                case "application/json":
+                    return $"[{bodyCollection}]";
+                default:
+                    return bodyCollection.ToString();
+            }
         }
     }
 }

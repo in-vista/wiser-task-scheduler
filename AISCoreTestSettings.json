@@ -1,5 +1,6 @@
 {
 	"ServiceName": "AIS Core test",
+	"ConnectionString": "",
 	"LogSettings": {
 		"LogRunBody": false
 	},
@@ -8,6 +9,7 @@
 			"Type": "Continuous",
 			"TimeId": 1,
 			"Delay": "00:00:30",
+			"SkipDays": [1,2,3, 4,5,6],
 			"LogSettings": {
 				"LogMinimumLevel": "Information"
 			}
@@ -51,31 +53,112 @@
 			"TimeId": 7,
 			"Delay": "00:00:30",
 			"StartTime": "00:00:15",
-			"SkipDays": [2]
+			"SkipDays": [2, 3]
 		}
 	],
 	"Queries": [
 		{
 			"TimeId": 1,
-			"Order": 2
+			"Order": 2,
+			"UseResultSet": "TestMarks",
+			"Query": "INSERT INTO _ais_core_tests (information) VALUES ('[{id}]: [{title}]')"
 		},
 		{
 			"TimeId": 1,
-			"Order": 1
+			"Order": 1,
+			"ResultSetName": "TestMarks",
+			"Query": "SELECT id, title FROM wiser_item WHERE entity_type = 'TestMark'"
 		},
 		{
 			"TimeId": 7,
 			"Order": 2,
+			"Query": "SELECT 3 AS test",
 			"LogSettings": {
 				"LogRunStartAndStop": false,
 				"LogRunBody": false
 			}
+		},
+		{
+			"TimeId": 1,
+			"Order": 3,
+			"UseResultSet": "TestMarks",
+			"Query": "INSERT INTO _ais_core_tests (information) VALUES ('Added [{id[]}] [{title[]}]')"
+		},
+		{
+			"TimeId": 1,
+			"Order": 4,
+			"UseResultSet": "TestMarks",
+			"Query": "INSERT INTO _ais_core_tests (information) SELECT CONCAT('One of [{title[]}] has list with name: ', detail.`value`) FROM wiser_itemdetail AS detail WHERE detail.item_id = [{id}] AND detail.`key` = 'list_name'"
+		},
+		{
+			"TimeId": 7,
+			"Order": 3,
+			"ResultSetName": "TestMarks",
+			"Query": "SELECT id, title FROM wiser_item WHERE entity_type = 'TestMark'"
 		}
 	],
 	"HttpApis": [
 		{
 			"TimeId": 7,
-			"Order": 1
+			"Order": 1,
+			"Url": "https://localhost:44306/api/Test",
+			"Method": "Get"
+		},
+		{
+		"TimeId": 7,
+			"Order": 4,
+			"Url": "https://localhost:44306/api/Test",
+			"Method": "Post",
+			"UseResultSet": "TestMarks",
+			"Headers": [
+				{
+					"Name": "Accept",
+					"Value": "application/json"
+				}
+			],
+			"Body": {
+				"ContentType": "application/json",
+				"BodyParts": [
+					{
+						"Text": "{\"Id\": [{id}]}"
+					}
+				]
+			}
+		},
+		{
+		"TimeId": 7,
+			"Order": 5,
+			"Url": "https://localhost:44306/api/Test/Range",
+			"Method": "Post",
+			"UseResultSet": "TestMarks",
+			"Headers": [
+				{
+					"Name": "Accept",
+					"Value": "application/json"
+				}
+			],
+			"Body": {
+				"ContentType": "application/json",
+				"BodyParts": [
+					{
+						"Text": "{\"Id\": [{id}]}",
+						"SingleItem": false
+					}
+				]
+			}
+		},
+		{
+			"TimeId": 7,
+			"Order": 6,
+			"Url": "https://localhost:44306/api/Test/Exception",
+			"Method": "Get"
+		},
+		{
+			"TimeId": 7,
+			"Order": 7,
+			"UseResultSet": "TestMarks",
+			"Url": "https://localhost:44306/api/Test/[{id}]",
+			"Method": "Get"
 		}
 	]
 }
