@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
 using AutoImportServiceCore.Core.Models;
 
@@ -12,11 +13,13 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// <summary>
         /// Gets or sets the full URL for the call.
         /// </summary>
+        [Required]
         public string Url { get; set; }
 
         /// <summary>
         /// Gets or sets the method to use.
         /// </summary>
+        [Required]
         public string Method { get; set; }
 
         /// <summary>

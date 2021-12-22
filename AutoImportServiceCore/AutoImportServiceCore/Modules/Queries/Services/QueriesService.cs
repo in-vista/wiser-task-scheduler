@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
@@ -41,21 +42,24 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         }
 
         /// <inheritdoc />
-        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, SortedDictionary<int, string>> usingResultSet)
+        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets)
         {
             var query = action as QueryModel;
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}");
 
             // If not using a result set execute the query as given.
-            if (usingResultSet == null)
+            if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
+                LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}");
                 return await databaseConnection.ExecuteQuery(connectionString, query.Query);
             }
 
-            var tuple = ReplacementHelper.PrepareText(query.Query, usingResultSet, mySqlSafe: true);
+            var tuple = ReplacementHelper.PrepareText(query.Query, resultSets[query.UseResultSet], mySqlSafe: true);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
+
+            LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}");
 
             // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
             if (parameterKeys.Count == 0)
@@ -64,9 +68,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             }
 
             // Perform the query for each row in the result set that is being used.
-            for (var i = 1; i <= usingResultSet.First().Value.Count; i++)
+            for (var i = 1; i <= resultSets[query.UseResultSet].First().Value.Count; i++)
             {
-                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, usingResultSet, mySqlSafe: true);
+                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, resultSets[query.UseResultSet], mySqlSafe: true);
 
                 await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues);
             }

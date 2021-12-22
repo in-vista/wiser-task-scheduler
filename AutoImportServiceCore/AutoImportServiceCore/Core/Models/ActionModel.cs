@@ -31,6 +31,12 @@ namespace AutoImportServiceCore.Core.Models
         public string UseResultSet { get; set; } = String.Empty;
 
         /// <summary>
+        /// Gets or sets which result set needs to be a specific value.
+        /// Result set name and required status code, separated by a comma (,).
+        /// </summary>
+        public string OnlyWithStatusCode { get; set; }
+
+        /// <summary>
         /// Gets or sets the log settings that apply to the action.
         /// </summary>
         public LogSettings LogSettings { get; set; }

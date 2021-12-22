@@ -1,4 +1,5 @@
-﻿using AutoImportServiceCore.Core.Models;
+﻿using System.ComponentModel.DataAnnotations;
+using AutoImportServiceCore.Core.Models;
 
 namespace AutoImportServiceCore.Modules.Queries.Models
 {
@@ -10,6 +11,7 @@ namespace AutoImportServiceCore.Modules.Queries.Models
         /// <summary>
         /// Gets or sets the query to execute.
         /// </summary>
+        [Required]
         public string Query { get; set; }
     }
 }

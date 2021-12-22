@@ -39,53 +39,71 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         }
 
         /// <inheritdoc />
-        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, SortedDictionary<int, string>> usingResultSet)
+        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets)
         {
             var resultSet = new Dictionary<string, SortedDictionary<int, string>>();
 
             var httpApi = action as HttpApiModel;
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}, url: {httpApi.Url}, method: {httpApi.Method}");
+            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
 
-            var tuple = ReplacementHelper.PrepareText(httpApi.Url, usingResultSet, htmlEncode: true);
-            var url = tuple.Item1;
-            var parameterKeys = tuple.Item2;
+            var url = httpApi.Url;
 
-            var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), ReplacementHelper.ReplaceText(url, 1, parameterKeys, usingResultSet, htmlEncode: true));
+            // If a result set needs to be used apply it on the url.
+            if (!String.IsNullOrWhiteSpace(httpApi.UseResultSet))
+            {
+                var tuple = ReplacementHelper.PrepareText(url, resultSets[httpApi.UseResultSet], htmlEncode: true);
+                url = tuple.Item1;
+                var parameterKeys = tuple.Item2;
+                url = ReplacementHelper.ReplaceText(url, 1, parameterKeys, resultSets[httpApi.UseResultSet], htmlEncode: true);
+            }
+
+            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
+            var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), url);
 
             foreach (var header in httpApi.Headers)
             {
                 request.Headers.Add(header.Name, header.Value);
             }
-
+            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}");
+            
             if (httpApi.Body != null)
             {
                 var finalBody = new StringBuilder();
 
                 foreach (var bodyPart in httpApi.Body.BodyParts)
                 {
-                    tuple = ReplacementHelper.PrepareText(bodyPart.Text, usingResultSet);
-                    var body = tuple.Item1;
-                    parameterKeys = tuple.Item2;
-
-                    if (usingResultSet != null && parameterKeys.Count > 0)
+                    var body = bodyPart.Text;
+                    
+                    // If the part needs a result set, apply it.
+                    if (!String.IsNullOrWhiteSpace(bodyPart.UseResultSet))
                     {
-                        if (bodyPart.SingleItem)
+                        var tuple = ReplacementHelper.PrepareText(bodyPart.Text, resultSets[bodyPart.UseResultSet]);
+                        body = tuple.Item1;
+                        var parameterKeys = tuple.Item2;
+
+                        if (parameterKeys.Count > 0)
                         {
-                            if (usingResultSet.First().Value.Count > 0)
+                            // Replace body with values from first row.
+                            if (bodyPart.SingleItem)
                             {
-                                body = ReplacementHelper.ReplaceText(body, 1, parameterKeys, usingResultSet);
+                                if (resultSets[bodyPart.UseResultSet].First().Value.Count > 0)
+                                {
+                                    body = ReplacementHelper.ReplaceText(body, 1, parameterKeys, resultSets[bodyPart.UseResultSet]);
+                                }
                             }
-                        }
-                        else
-                        {
-                            body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, usingResultSet);
+                            // Replace and combine body with values for each row.
+                            else
+                            {
+                                body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, resultSets[bodyPart.UseResultSet]);
+                            }
                         }
                     }
 
                     finalBody.Append(body);
                 }
 
+                LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{finalBody.ToString()}");
                 request.Content = new StringContent(finalBody.ToString())
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
@@ -97,6 +115,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             resultSet.Add("StatusCode", new SortedDictionary<int, string>() {{1, ((int) response.StatusCode).ToString()}});
 
+            // Add all headers to the result set.
             foreach (var header in response.Headers)
             {
                 resultSet.Add(header.Key, new SortedDictionary<int, string>());
@@ -109,6 +128,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 }
             }
 
+            // Add all content headers to the result set.
             foreach (var header in response.Content.Headers)
             {
                 resultSet.Add(header.Key, new SortedDictionary<int, string>());
@@ -120,17 +140,27 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     row++;
                 }
             }
-
             
             resultSet.Add("Body", new SortedDictionary<int, string>() {{1, await response.Content.ReadAsStringAsync()}});
+
+            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"][1]}, Result body:\n{resultSet["Body"][1]}");
 
             return resultSet;
         }
 
+        /// <summary>
+        /// Replace values in the body for each row and return the combined result.
+        /// </summary>
+        /// <param name="body">The body text to use for each row.</param>
+        /// <param name="contentType">The content type that is being send in the request.</param>
+        /// <param name="parameterKeys">The keys of the parameters that need to be replaced.</param>
+        /// <param name="usingResultSet">The result set to get the values from.</param>
+        /// <returns></returns>
         private string GenerateBodyCollection(string body, string contentType, List<string> parameterKeys, Dictionary<string, SortedDictionary<int, string>> usingResultSet)
         {
             var separator = String.Empty;
 
+            // Add a separator between each row result based on content type.
             switch (contentType)
             {
                 case "application/json":
@@ -147,6 +177,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 bodyCollection.Append($"{(i > 1 ? separator : "")}{bodyWithValues}");
             }
 
+            // Add collection syntax based on content type.
             switch (contentType)
             {
                 case "application/json":

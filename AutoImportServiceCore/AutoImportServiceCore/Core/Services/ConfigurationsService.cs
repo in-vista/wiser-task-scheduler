@@ -138,13 +138,39 @@ namespace AutoImportServiceCore.Core.Services
 
             foreach (var action in actions)
             {
-                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, String.IsNullOrWhiteSpace(action.Value.UseResultSet) ? null : resultSets[action.Value.UseResultSet]);
+                if (SkipAction(resultSets, action.Value))
+                {
+                    continue;
+                }
+
+                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets);
 
                 if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
                 {
                     resultSets.Add(action.Value.ResultSetName, resultSet);
                 }
             }
+        }
+
+        /// <summary>
+        /// Check if the action needs to be skipped due to constraints when it is allowed to run.
+        /// </summary>
+        /// <param name="resultSets">The reult sets of the previous actions within the run to reference.</param>
+        /// <param name="action">The action to perform the check on.</param>
+        /// <returns></returns>
+        private bool SkipAction(Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets, ActionModel action)
+        {
+            if (!String.IsNullOrWhiteSpace(action.OnlyWithStatusCode))
+            {
+                var parts = action.OnlyWithStatusCode.Split(",");
+
+                if (resultSets[parts[0]]["StatusCode"][1] != parts[1])
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

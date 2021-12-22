@@ -9,7 +9,7 @@
 			"Type": "Continuous",
 			"TimeId": 1,
 			"Delay": "00:00:30",
-			"SkipDays": [1,2,3, 4,5,6],
+			"SkipDays": [1,2,3,4,5,6],
 			"LogSettings": {
 				"LogMinimumLevel": "Information"
 			}
@@ -53,7 +53,14 @@
 			"TimeId": 7,
 			"Delay": "00:00:30",
 			"StartTime": "00:00:15",
-			"SkipDays": [2, 3]
+			"SkipDays": [2,3]
+		},
+		{
+			"Type": "Continuous",
+			"TimeId": 8,
+			"Delay": "00:00:30",
+			"StartTime": "00:00:00",
+			"SkipDays": [2]
 		}
 	],
 	"Queries": [
@@ -95,6 +102,24 @@
 			"Order": 3,
 			"ResultSetName": "TestMarks",
 			"Query": "SELECT id, title FROM wiser_item WHERE entity_type = 'TestMark'"
+		},
+		{
+			"TimeId": 8,
+			"Order": 1,
+			"ResultSetName": "Site",
+			"Query": "SELECT objects.`value` AS domain FROM `easy_objects` AS objects WHERE objects.`key` = 'maindomain'"
+		},
+		{
+			"TimeId": 8,
+			"Order": 2,
+			"ResultSetName": "TestMarks",
+			"Query": "SELECT id, title FROM wiser_item WHERE entity_type = 'TestMark'"
+		},
+		{
+			"TimeId": 8,
+			"Order": 4,
+			"OnlyWithStatusCode": "Depth,201",
+			"Query": "SELECT 1"
 		}
 	],
 	"HttpApis": [
@@ -109,28 +134,6 @@
 			"Order": 4,
 			"Url": "https://localhost:44306/api/Test",
 			"Method": "Post",
-			"UseResultSet": "TestMarks",
-			"Headers": [
-				{
-					"Name": "Accept",
-					"Value": "application/json"
-				}
-			],
-			"Body": {
-				"ContentType": "application/json",
-				"BodyParts": [
-					{
-						"Text": "{\"Id\": [{id}]}"
-					}
-				]
-			}
-		},
-		{
-		"TimeId": 7,
-			"Order": 5,
-			"Url": "https://localhost:44306/api/Test/Range",
-			"Method": "Post",
-			"UseResultSet": "TestMarks",
 			"Headers": [
 				{
 					"Name": "Accept",
@@ -142,7 +145,29 @@
 				"BodyParts": [
 					{
 						"Text": "{\"Id\": [{id}]}",
-						"SingleItem": false
+						"UseResultSet": "TestMarks"
+					}
+				]
+			}
+		},
+		{
+		"TimeId": 7,
+			"Order": 5,
+			"Url": "https://localhost:44306/api/Test/Range",
+			"Method": "Post",
+			"Headers": [
+				{
+					"Name": "Accept",
+					"Value": "application/json"
+				}
+			],
+			"Body": {
+				"ContentType": "application/json",
+				"BodyParts": [
+					{
+						"Text": "{\"Id\": [{id}]}",
+						"SingleItem": false,
+						"UseResultSet": "TestMarks"
 					}
 				]
 			}
@@ -159,6 +184,36 @@
 			"UseResultSet": "TestMarks",
 			"Url": "https://localhost:44306/api/Test/[{id}]",
 			"Method": "Get"
-		}
+		},
+		{
+		"TimeId": 8,
+			"Order": 3,
+			"ResultSetName": "Depth",
+			"Url": "https://localhost:44306/api/Test/Depth",
+			"Method": "post",
+			"Headers": [
+				{
+					"Name": "Accept",
+					"Value": "application/json"
+				}
+			],
+			"Body": {
+				"ContentType": "application/json",
+				"BodyParts": [
+					{
+						"Text": "{\"Domain\": \"[{domain}]\", \"Items\":",
+						"UseResultSet": "Site"
+					},
+					{
+						"Text": "{\"Id\": [{id}]}",
+						"SingleItem": false,
+						"UseResultSet": "TestMarks"
+					},
+					{
+						"Text": "}"
+					}
+				]
+			}
+		},
 	]
 }

@@ -23,15 +23,15 @@ namespace AutoImportServiceCore.Core.Models
         public string ConnectionString { get; set; }
 
         /// <summary>
+        /// Gets or sets the log settings.
+        /// </summary>
+        public LogSettings LogSettings { get; set; }
+
+        /// <summary>
         /// Gets or sets the run scheme.
         /// </summary>
         [Required]
         public IEnumerable<RunSchemeModel> RunSchemes { get; set; }
-
-        /// <summary>
-        /// Gets or sets the log settings.
-        /// </summary>
-        public LogSettings LogSettings { get; set; }
 
         /// <summary>
         /// Gets or sets the queries.

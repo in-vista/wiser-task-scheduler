@@ -1,4 +1,6 @@
-﻿namespace AutoImportServiceCore.Modules.HttpApis.Models
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
     /// <summary>
     /// A model to add Headers to a HTTP API call.
@@ -8,11 +10,13 @@
         /// <summary>
         /// Gets or sets the name of the header property to set.
         /// </summary>
+        [Required]
         public string Name { get; set; }
 
         /// <summary>
         /// Gets or sets the value of the header property to set.
         /// </summary>
+        [Required]
         public string Value { get; set; }
     }
 }

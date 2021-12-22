@@ -20,8 +20,8 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// Execute the action based on the type.
         /// </summary>
         /// <param name="action">The action to execute.</param>
-        /// <param name="usingResultSet">The result set of another action in the current run.</param>
+        /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <returns></returns>
-        Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, SortedDictionary<int, string>> usingResultSet);
+        Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets);
     }
 }

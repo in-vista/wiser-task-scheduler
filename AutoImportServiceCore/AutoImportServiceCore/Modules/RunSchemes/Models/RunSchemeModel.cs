@@ -58,7 +58,7 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Models
         public int DayOfMonth { get; set; } = 1;
 
         /// <summary>
-        /// Gets or sets the hour for <see cref="RunSchemeTypes"/>.Weekly and <see cref="RunSchemeTypes"/>.Monthly.
+        /// Gets or sets the hour for <see cref="RunSchemeTypes"/>.Daily, <see cref="RunSchemeTypes"/>.Weekly and <see cref="RunSchemeTypes"/>.Monthly.
         /// </summary>
         public TimeSpan Hour { get; set; }
 
