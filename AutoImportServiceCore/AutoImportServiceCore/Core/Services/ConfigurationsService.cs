@@ -71,8 +71,8 @@ namespace AutoImportServiceCore.Core.Services
         {
             var actionSets = new List<ActionModel[]>
             {
-                configuration.Queries.ToArray<ActionModel>(),
-                configuration.HttpApis.ToArray<ActionModel>()
+                configuration.Queries,
+                configuration.HttpApis
             };
 
             var allActions = new List<ActionModel>();
@@ -155,7 +155,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Check if the action needs to be skipped due to constraints when it is allowed to run.
         /// </summary>
-        /// <param name="resultSets">The reult sets of the previous actions within the run to reference.</param>
+        /// <param name="resultSets">The result sets of the previous actions within the run to reference.</param>
         /// <param name="action">The action to perform the check on.</param>
         /// <returns></returns>
         private bool SkipAction(Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets, ActionModel action)
