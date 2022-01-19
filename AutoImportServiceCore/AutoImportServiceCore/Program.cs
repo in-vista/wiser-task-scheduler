@@ -1,3 +1,6 @@
+using System;
+using System.Diagnostics;
+using System.Linq;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,12 +21,25 @@ namespace AutoImportServiceCore
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
-            Host.CreateDefaultBuilder(args)
+            Host.CreateDefaultBuilder(args).ConfigureAppConfiguration((hostingContext, config) =>
+                {
+                    config.SetBasePath(AppContext.BaseDirectory);
+                    config.Sources
+                        .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
+                        .Where(x => x.Path == "appsettings.json");
+                })
                 .ConfigureServices((hostContext, services) =>
                 {
                     ConfigureSettings(hostContext.Configuration, services);
+                    //EventLog.WriteEntry("Auto import service", $"{hostContext.HostingEnvironment.ApplicationName} | {hostContext.HostingEnvironment.ContentRootPath} | {hostContext.HostingEnvironment.ContentRootFileProvider}");
+                    //Console.WriteLine($"{hostContext.HostingEnvironment.ApplicationName} | {hostContext.HostingEnvironment.ContentRootPath} | {hostContext.HostingEnvironment.ContentRootFileProvider}");
+                    
                     ConfigureHostedServices(services);
                     ConfigureAisServices(services);
+
+                    Log.Logger = new LoggerConfiguration()
+                        .ReadFrom.Configuration(hostContext.Configuration)
+                        .CreateLogger();
                     services.AddLogging(builder => { builder.AddSerilog(); });
                 });
 
