@@ -44,7 +44,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <inheritdoc />
         public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets)
         {
-            var query = action as QueryModel;
+            var query = (QueryModel)action;
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}");
 

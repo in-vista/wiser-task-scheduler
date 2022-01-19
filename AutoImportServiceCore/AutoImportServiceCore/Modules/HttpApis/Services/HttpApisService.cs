@@ -33,17 +33,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         }
 
         /// <inheritdoc />
-        public async Task Initialize(ConfigurationModel configuration)
-        {
-
-        }
+        public async Task Initialize(ConfigurationModel configuration) { }
 
         /// <inheritdoc />
         public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets)
         {
             var resultSet = new Dictionary<string, SortedDictionary<int, string>>();
 
-            var httpApi = action as HttpApiModel;
+            var httpApi = (HttpApiModel)action;
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
 
@@ -103,7 +100,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     finalBody.Append(body);
                 }
 
-                LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{finalBody.ToString()}");
+                LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{finalBody}");
                 request.Content = new StringContent(finalBody.ToString())
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}

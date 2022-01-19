@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
@@ -31,37 +32,42 @@ namespace AutoImportServiceCore.Core.Services
             var resultSet = new Dictionary<string, SortedDictionary<int, string>>();
 
             await using var connection = new MySqlConnection(connectionString);
-            await connection.OpenAsync();
-
-            var command = connection.CreateCommand();
-            command.CommandText = query;
-
-            await using (var reader = await command.ExecuteReaderAsync())
+            try
             {
-                if (!reader.HasRows)
-                {
-                    return resultSet;
-                }
+                await connection.OpenAsync();
 
-                var row = 1;
+                await using var command = connection.CreateCommand();
+                command.CommandText = query;
 
-                // Add rows to result set.
-                while (await reader.ReadAsync())
+                await using (var reader = await command.ExecuteReaderAsync())
                 {
-                    for (var i = 0; i < reader.FieldCount; i++)
+                    if (!reader.HasRows)
                     {
-                        var columnName = reader.GetName(i);
-                        resultSet.TryAdd(columnName, new SortedDictionary<int, string>());
-                        resultSet[columnName].Add(row, reader[i].ToString());
+                        return resultSet;
                     }
 
-                    row++;
+                    var row = 1;
+
+                    // Add rows to result set.
+                    while (await reader.ReadAsync())
+                    {
+                        for (var i = 0; i < reader.FieldCount; i++)
+                        {
+                            var columnName = reader.GetName(i);
+                            resultSet.TryAdd(columnName, new SortedDictionary<int, string>());
+                            resultSet[columnName].Add(row, reader[i].ToString());
+                        }
+
+                        row++;
+                    }
                 }
+
+                return resultSet;
             }
-
-            await connection.CloseAsync();
-
-            return resultSet;
+            finally
+            {
+                await connection.CloseAsync();
+            }
         }
     }
 }
