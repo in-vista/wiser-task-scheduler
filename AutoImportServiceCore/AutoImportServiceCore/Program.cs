@@ -1,6 +1,6 @@
 using System;
-using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,13 +15,19 @@ namespace AutoImportServiceCore
 {
     public class Program
     {
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
-            CreateHostBuilder(args).Build().Run();
+            await CreateHostBuilder(args).Build().RunAsync();
+            var a = 1;
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
-            Host.CreateDefaultBuilder(args).ConfigureAppConfiguration((hostingContext, config) =>
+            Host.CreateDefaultBuilder(args)
+                .UseWindowsService((options) =>
+                {
+                    options.ServiceName = "Auto import service";
+                })
+                .ConfigureAppConfiguration((hostingContext, config) =>
                 {
                     config.SetBasePath(AppContext.BaseDirectory);
                     config.Sources
@@ -31,9 +37,6 @@ namespace AutoImportServiceCore
                 .ConfigureServices((hostContext, services) =>
                 {
                     ConfigureSettings(hostContext.Configuration, services);
-                    //EventLog.WriteEntry("Auto import service", $"{hostContext.HostingEnvironment.ApplicationName} | {hostContext.HostingEnvironment.ContentRootPath} | {hostContext.HostingEnvironment.ContentRootFileProvider}");
-                    //Console.WriteLine($"{hostContext.HostingEnvironment.ApplicationName} | {hostContext.HostingEnvironment.ContentRootPath} | {hostContext.HostingEnvironment.ContentRootFileProvider}");
-                    
                     ConfigureHostedServices(services);
                     ConfigureAisServices(services);
 
