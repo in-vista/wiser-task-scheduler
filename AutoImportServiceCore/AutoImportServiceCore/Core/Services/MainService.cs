@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
@@ -14,6 +15,7 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Services
 {
@@ -94,8 +96,12 @@ namespace AutoImportServiceCore.Core.Services
         private async Task<IEnumerable<ConfigurationModel>> GetConfigurations()
         {
             var configurations = new List<ConfigurationModel>();
-
-            var configuration = JsonConvert.DeserializeObject<ConfigurationModel>(await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.json"));
+            
+            var xDocument = XDocument.Parse(await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.xml"));
+            string json = JsonConvert.SerializeXNode(xDocument);
+            var jObject = JsonConvert.DeserializeObject<JObject>(json);//await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.json"));
+            var configuration = jObject["Mark"].Value<ConfigurationModel>();
+            //var configuration = jObject.Value<ConfigurationModel>("Mark");
 
             using (var scope = serviceProvider.CreateScope())
             {
