@@ -8,6 +8,7 @@ using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Services
 {
@@ -134,7 +135,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task ExecuteAsync()
         {
-            var resultSets = new Dictionary<string, Dictionary<string, SortedDictionary<int, string>>>();
+            var resultSets = new JObject();
 
             foreach (var action in actions)
             {
@@ -158,16 +159,16 @@ namespace AutoImportServiceCore.Core.Services
         /// <param name="resultSets">The result sets of the previous actions within the run to reference.</param>
         /// <param name="action">The action to perform the check on.</param>
         /// <returns></returns>
-        private bool SkipAction(Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets, ActionModel action)
+        private bool SkipAction(JObject resultSets, ActionModel action)
         {
             if (!String.IsNullOrWhiteSpace(action.OnlyWithStatusCode))
             {
                 var parts = action.OnlyWithStatusCode.Split(",");
 
-                if (resultSets[parts[0]]["StatusCode"][1] != parts[1])
+                /*if (resultSets[parts[0]]["StatusCode"][1] != parts[1])
                 {
                     return true;
-                }
+                }*/
             }
 
             return false;

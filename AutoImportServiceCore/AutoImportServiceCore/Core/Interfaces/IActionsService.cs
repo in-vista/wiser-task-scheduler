@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Models;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Interfaces
 {
@@ -22,6 +23,6 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="action">The action to execute.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <returns></returns>
-        Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets);
+        Task<JObject> Execute(ActionModel action, JObject resultSets);
     }
 }

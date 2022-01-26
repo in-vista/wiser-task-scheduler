@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using GeeksCoreLibrary.Core.Extensions;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Helpers
 {
@@ -17,7 +18,7 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static Tuple<string, List<string>> PrepareText(string originalString, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
+        public static Tuple<string, List<string>> PrepareText(string originalString, JObject usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
         {
             var result = originalString;
             var parameterKeys = new List<string>();
@@ -35,7 +36,7 @@ namespace AutoImportServiceCore.Core.Helpers
 
                     var values = new List<string>();
 
-                    for (var i = 1; i <= usingResultSet[key].Count; i++)
+                    for (var i = 1; i <= ((JArray)usingResultSet[key]).Count; i++)
                     {
                         values.Add(GetValue(key, i, usingResultSet, mySqlSafe, htmlEncode));
                     }
@@ -62,7 +63,7 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
+        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, JObject usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
         {
             var result = originalString;
             
@@ -83,9 +84,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="mySqlSafe">If the value from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the value from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        private static string GetValue(string key, int row, Dictionary<string, SortedDictionary<int, string>> usingResultSet, bool mySqlSafe, bool htmlEncode)
+        private static string GetValue(string key, int row, JObject usingResultSet, bool mySqlSafe, bool htmlEncode)
         {
-            var value = usingResultSet[key][row];
+            var value = (string)GetCorrectObject(key, row, usingResultSet);
 
             if (mySqlSafe)
             {
@@ -98,6 +99,31 @@ namespace AutoImportServiceCore.Core.Helpers
             }
 
             return value;
+        }
+
+        private static JValue GetCorrectObject(string key, int row, JObject usingResultSet)
+        {
+            var keyParts = key.Split(".");
+
+            if (keyParts.Length == 1)
+            {
+                return (JValue)usingResultSet[keyParts[0]];
+            }
+
+            var remainingKey = key.Substring(key.IndexOf(".") + 1);
+
+            if (!keyParts[0].EndsWith("]"))
+            {
+                return GetCorrectObject(remainingKey, row, (JObject) usingResultSet[keyParts[0]]);
+            }
+
+            var index = row;
+            if(keyParts[0][keyParts[0].Length - 2] != 'i')
+            {
+                index = Int32.Parse(keyParts[0].Substring(keyParts[0].IndexOf('[') + 1));
+            }
+
+            return GetCorrectObject(remainingKey, row, (JObject)((JArray)usingResultSet[keyParts[0].Substring(0, keyParts[0].IndexOf('['))])[index]);
         }
     }
 }

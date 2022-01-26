@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Services
 {
@@ -27,9 +28,9 @@ namespace AutoImportServiceCore.Core.Services
         /// <param name="connectionString">The connection string to use.</param>
         /// <param name="query">The query to execute.</param>
         /// <returns></returns>
-        public async Task<Dictionary<string, SortedDictionary<int, string>>> ExecuteQuery(string connectionString, string query)
+        public async Task<JObject> ExecuteQuery(string connectionString, string query)
         {
-            var resultSet = new Dictionary<string, SortedDictionary<int, string>>();
+            var resultSet = new JObject();
 
             await using var connection = new MySqlConnection(connectionString);
             try
@@ -46,20 +47,23 @@ namespace AutoImportServiceCore.Core.Services
                         return resultSet;
                     }
 
-                    var row = 1;
+                    var jArray = new JArray();
 
                     // Add rows to result set.
                     while (await reader.ReadAsync())
                     {
+                        var jObject = new JObject();
+
                         for (var i = 0; i < reader.FieldCount; i++)
                         {
                             var columnName = reader.GetName(i);
-                            resultSet.TryAdd(columnName, new SortedDictionary<int, string>());
-                            resultSet[columnName].Add(row, reader[i].ToString());
+                            jObject.Add(columnName, reader[i].ToString());
                         }
 
-                        row++;
+                        jArray.Add(jObject);
                     }
+
+                    resultSet.Add("Results", jArray);
                 }
 
                 return resultSet;

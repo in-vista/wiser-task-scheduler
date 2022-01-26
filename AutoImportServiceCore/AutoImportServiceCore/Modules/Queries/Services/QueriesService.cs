@@ -11,6 +11,7 @@ using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Modules.Queries.Services
 {
@@ -42,7 +43,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         }
 
         /// <inheritdoc />
-        public async Task<Dictionary<string, SortedDictionary<int, string>>> Execute(ActionModel action, Dictionary<string, Dictionary<string, SortedDictionary<int, string>>> resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
         {
             var query = (QueryModel)action;
 
@@ -55,7 +56,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 return await databaseConnection.ExecuteQuery(connectionString, query.Query);
             }
 
-            var tuple = ReplacementHelper.PrepareText(query.Query, resultSets[query.UseResultSet], mySqlSafe: true);
+            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[query.UseResultSet], mySqlSafe: true);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
 
@@ -67,16 +68,17 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 return await databaseConnection.ExecuteQuery(connectionString, queryString);
             }
 
+            var jArray = new JArray();
+
             // Perform the query for each row in the result set that is being used.
-            for (var i = 1; i <= resultSets[query.UseResultSet].First().Value.Count; i++)
+            for (var i = 1; i <= ((JArray)resultSets[query.UseResultSet].First()).Count; i++)
             {
-                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, resultSets[query.UseResultSet], mySqlSafe: true);
+                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, (JObject)resultSets[query.UseResultSet], mySqlSafe: true);
 
-                await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues);
+                jArray.Add(await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues));
             }
-
-            // TODO? combine result sets from each row.
-            return new Dictionary<string, SortedDictionary<int, string>>();
+            
+            return new JObject("Results", jArray);
         }
     }
 }
