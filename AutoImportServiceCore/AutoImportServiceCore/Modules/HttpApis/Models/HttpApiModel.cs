@@ -1,6 +1,6 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
-using System.Net.Http;
+using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Models;
 
 namespace AutoImportServiceCore.Modules.HttpApis.Models
@@ -8,6 +8,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
     /// <summary>
     /// A model for a HTTP API.
     /// </summary>
+    [XmlType("HttpApi")]
     public class HttpApiModel : ActionModel
     {
         /// <summary>
@@ -25,6 +26,8 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// <summary>
         /// Gets or sets additional headers to add before sending the request.
         /// </summary>
+        [XmlArray("Headers")]
+        [XmlArrayItem(typeof(HeaderModel))]
         public HeaderModel[] Headers { get; set; } = Array.Empty<HeaderModel>();
 
         /// <summary>

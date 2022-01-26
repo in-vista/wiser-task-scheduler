@@ -18,7 +18,6 @@ namespace AutoImportServiceCore
         public static async Task Main(string[] args)
         {
             await CreateHostBuilder(args).Build().RunAsync();
-            var a = 1;
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>

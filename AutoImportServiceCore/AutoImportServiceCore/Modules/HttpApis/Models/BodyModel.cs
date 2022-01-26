@@ -1,10 +1,12 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 
 namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
     /// <summary>
     /// A model to add a body to a HTTP API call.
     /// </summary>
+    [XmlType("Body")]
     public class BodyModel
     {
         /// <summary>
@@ -17,6 +19,8 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// Gets or sets the body parts.
         /// </summary>
         [Required]
+        [XmlArray("BodyParts")]
+        [XmlArrayItem(typeof(BodyPartModel))]
         public BodyPartModel[] BodyParts { get; set; }
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Models;
 
 namespace AutoImportServiceCore.Modules.Queries.Models
@@ -6,6 +7,7 @@ namespace AutoImportServiceCore.Modules.Queries.Models
     /// <summary>
     /// A model for a query.
     /// </summary>
+    [XmlType("Query")]
     public class QueryModel : ActionModel
     {
         /// <summary>

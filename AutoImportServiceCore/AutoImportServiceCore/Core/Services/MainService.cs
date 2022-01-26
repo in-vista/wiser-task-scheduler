@@ -2,9 +2,11 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
@@ -96,27 +98,37 @@ namespace AutoImportServiceCore.Core.Services
         private async Task<IEnumerable<ConfigurationModel>> GetConfigurations()
         {
             var configurations = new List<ConfigurationModel>();
-            
-            var xDocument = XDocument.Parse(await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.xml"));
-            string json = JsonConvert.SerializeXNode(xDocument);
-            var jObject = JsonConvert.DeserializeObject<JObject>(json);//await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.json"));
-            var configuration = jObject["Mark"].Value<ConfigurationModel>();
-            //var configuration = jObject.Value<ConfigurationModel>("Mark");
+            ConfigurationModel configuration;
+            var configurationText = await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.xml");
 
-            using (var scope = serviceProvider.CreateScope())
+            if (configurationText.StartsWith("{")) // Json configuration.
             {
-                var configurationsService = scope.ServiceProvider.GetRequiredService<IConfigurationsService>();
-                configurationsService.LogSettings = LogSettings;
+                configuration = JsonConvert.DeserializeObject<ConfigurationModel>(configurationText);
+            }
+            else if (configurationText.StartsWith("<Configuration>")) // XML configuration.
+            {
+                var serializer = new XmlSerializer(typeof(ConfigurationModel));
+                using var reader = new StringReader(configurationText);
+                configuration = (ConfigurationModel) serializer.Deserialize(reader);
+            }
+            else
+            {
+                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, "Configuration is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
+                return configurations; //TODO change to continue when configurations are loaded from Wiser.
+            }
 
-                // Only add configurations to run when they are valid.
-                if (configurationsService.IsValidConfiguration(configuration))
-                {
-                    configurations.Add(configuration);
-                }
-                else
-                {
-                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
-                }
+            using var scope = serviceProvider.CreateScope();
+            var configurationsService = scope.ServiceProvider.GetRequiredService<IConfigurationsService>();
+            configurationsService.LogSettings = LogSettings;
+
+            // Only add configurations to run when they are valid.
+            if (configurationsService.IsValidConfiguration(configuration))
+            {
+                configurations.Add(configuration);
+            }
+            else
+            {
+                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
             }
 
             return configurations;

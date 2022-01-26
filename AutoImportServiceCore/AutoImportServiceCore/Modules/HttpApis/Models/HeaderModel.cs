@@ -1,10 +1,12 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 
 namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
     /// <summary>
     /// A model to add Headers to a HTTP API call.
     /// </summary>
+    [XmlType("Header")]
     public class HeaderModel
     {
         /// <summary>

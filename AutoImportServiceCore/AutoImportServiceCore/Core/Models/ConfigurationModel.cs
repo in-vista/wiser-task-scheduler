@@ -1,5 +1,5 @@
-﻿using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
@@ -9,6 +9,7 @@ namespace AutoImportServiceCore.Core.Models
     /// <summary>
     /// A model for the configuration.
     /// </summary>
+    [XmlRoot("Configuration")]
     public class ConfigurationModel
     {
         /// <summary>
@@ -31,16 +32,22 @@ namespace AutoImportServiceCore.Core.Models
         /// Gets or sets the run scheme.
         /// </summary>
         [Required]
-        public IEnumerable<RunSchemeModel> RunSchemes { get; set; }
+        [XmlArray("RunSchemes")]
+        [XmlArrayItem(typeof(RunSchemeModel))]
+        public RunSchemeModel[] RunSchemes { get; set; }
 
         /// <summary>
         /// Gets or sets the queries.
         /// </summary>
+        [XmlArray("Queries")]
+        [XmlArrayItem(typeof(QueryModel))]
         public QueryModel[] Queries { get; set; }
 
         /// <summary>
         /// Gets or sets the HTTP APIs.
         /// </summary>
+        [XmlArray("HttpApis")]
+        [XmlArrayItem(typeof(HttpApiModel))]
         public HttpApiModel[] HttpApis { get; set; }
     }
 }
