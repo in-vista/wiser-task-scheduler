@@ -15,10 +15,11 @@ namespace AutoImportServiceCore.Core.Helpers
         /// </summary>
         /// <param name="originalString">The string to prepare.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
+        /// <param name="remainingKey">The remainder of they key (after the first .) to be used for collections.</param>
         /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static Tuple<string, List<string>> PrepareText(string originalString, JObject usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
+        public static Tuple<string, List<string>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, bool mySqlSafe = false, bool htmlEncode = false)
         {
             var result = originalString;
             var parameterKeys = new List<string>();
@@ -35,13 +36,20 @@ namespace AutoImportServiceCore.Core.Helpers
                     key = key.Replace("[]", "");
 
                     var values = new List<string>();
+                    var lastKeyIndex = key.LastIndexOf('.');
 
-                    for (var i = 1; i <= ((JArray)usingResultSet[key]).Count; i++)
+                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>($"{(remainingKey.Length > 0 ? $"{remainingKey}." : "")}{key.Substring(0, lastKeyIndex)}", 0, usingResultSet);
+                    for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
-                        values.Add(GetValue(key, i, usingResultSet, mySqlSafe, htmlEncode));
+                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), i, (JObject)usingResultSetArray[i], mySqlSafe, htmlEncode));
                     }
 
                     result = result.Replace($"[{{{key}[]}}]", String.Join(",", values));
+                }
+                else if (key.Contains("<>"))
+                {
+                    key = key.Replace("<>", "");
+                    result = result.Replace($"[{{{key}<>}}]", GetValue(key, 0, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, 0, usingResultSet), mySqlSafe, htmlEncode));
                 }
                 else
                 {
@@ -86,7 +94,7 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <returns></returns>
         private static string GetValue(string key, int row, JObject usingResultSet, bool mySqlSafe, bool htmlEncode)
         {
-            var value = (string)GetCorrectObject(key, row, usingResultSet);
+            var value = (string)ResultSetHelper.GetCorrectObject<JValue>(key, row, usingResultSet);
 
             if (mySqlSafe)
             {
@@ -99,31 +107,6 @@ namespace AutoImportServiceCore.Core.Helpers
             }
 
             return value;
-        }
-
-        private static JValue GetCorrectObject(string key, int row, JObject usingResultSet)
-        {
-            var keyParts = key.Split(".");
-
-            if (keyParts.Length == 1)
-            {
-                return (JValue)usingResultSet[keyParts[0]];
-            }
-
-            var remainingKey = key.Substring(key.IndexOf(".") + 1);
-
-            if (!keyParts[0].EndsWith("]"))
-            {
-                return GetCorrectObject(remainingKey, row, (JObject) usingResultSet[keyParts[0]]);
-            }
-
-            var index = row;
-            if(keyParts[0][keyParts[0].Length - 2] != 'i')
-            {
-                index = Int32.Parse(keyParts[0].Substring(keyParts[0].IndexOf('[') + 1));
-            }
-
-            return GetCorrectObject(remainingKey, row, (JObject)((JArray)usingResultSet[keyParts[0].Substring(0, keyParts[0].IndexOf('['))])[index]);
         }
     }
 }

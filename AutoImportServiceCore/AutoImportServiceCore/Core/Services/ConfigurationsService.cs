@@ -6,6 +6,7 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using BuckarooSdk.DataTypes.Response.Status;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
@@ -151,6 +152,8 @@ namespace AutoImportServiceCore.Core.Services
                     resultSets.Add(action.Value.ResultSetName, resultSet);
                 }
             }
+
+            resultSets = null;
         }
 
         /// <summary>
@@ -165,10 +168,10 @@ namespace AutoImportServiceCore.Core.Services
             {
                 var parts = action.OnlyWithStatusCode.Split(",");
 
-                /*if (resultSets[parts[0]]["StatusCode"][1] != parts[1])
+                if ((string)(ResultSetHelper.GetCorrectObject<JObject>(parts[0], 0, resultSets)["StatusCode"]) != parts[1])
                 {
                     return true;
-                }*/
+                }
             }
 
             return false;

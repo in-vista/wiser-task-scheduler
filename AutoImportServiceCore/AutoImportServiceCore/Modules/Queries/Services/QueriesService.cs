@@ -56,7 +56,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 return await databaseConnection.ExecuteQuery(connectionString, query.Query);
             }
 
-            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[query.UseResultSet], mySqlSafe: true);
+            var keyParts = query.UseResultSet.Split('.');
+            var remainingKey = keyParts.Length > 1 ? query.UseResultSet.Substring(keyParts[0].Length + 1) : "";
+            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, mySqlSafe: true);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
 
@@ -71,14 +73,18 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var jArray = new JArray();
 
             // Perform the query for each row in the result set that is being used.
-            for (var i = 1; i <= ((JArray)resultSets[query.UseResultSet].First()).Count; i++)
+            var usingResultSet = ResultSetHelper.GetCorrectObject<JArray>(query.UseResultSet, 0, resultSets);
+            for (var i = 0; i < usingResultSet.Count; i++)
             {
-                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, (JObject)resultSets[query.UseResultSet], mySqlSafe: true);
+                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, (JObject)usingResultSet[i], mySqlSafe: true);
 
                 jArray.Add(await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues));
             }
-            
-            return new JObject("Results", jArray);
+
+            return new JObject
+            {
+                {"Results", jArray}
+            };
         }
     }
 }
