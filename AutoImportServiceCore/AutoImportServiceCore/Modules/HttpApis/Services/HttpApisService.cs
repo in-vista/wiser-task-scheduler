@@ -69,6 +69,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="httpApi">The HTTP API action to execute.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <param name="useResultSet">The result set to use for this execution.</param>
+        /// <param name="row">The index/row of the array, passed to be used if '[i]' is used in the key.</param>
         /// <returns></returns>
         private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row)
         {
