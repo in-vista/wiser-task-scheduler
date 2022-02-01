@@ -14,6 +14,7 @@ using AutoImportServiceCore.Modules.RunSchemes.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 
 namespace AutoImportServiceCore.Core.Services
@@ -23,6 +24,7 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
+        private readonly string localConfiguration;
         private readonly IServiceProvider serviceProvider;
         private readonly ILogger<MainService> logger;
 
@@ -34,8 +36,9 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IServiceProvider serviceProvider, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, ILogger<MainService> logger)
         {
+            localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             this.serviceProvider = serviceProvider;
             this.logger = logger;
 
@@ -95,23 +98,47 @@ namespace AutoImportServiceCore.Core.Services
         private async Task<IEnumerable<ConfigurationModel>> GetConfigurations()
         {
             var configurations = new List<ConfigurationModel>();
-            ConfigurationModel configuration;
-            var configurationText = await File.ReadAllTextAsync(@"C:\Ontwikkeling\Intern\autoimportservice_core\AISCoreTestSettings.xml");
-
-            if (configurationText.StartsWith("{")) // Json configuration.
+            
+            if (String.IsNullOrWhiteSpace(localConfiguration))
             {
-                configuration = JsonConvert.DeserializeObject<ConfigurationModel>(configurationText);
+                throw new NotImplementedException();
             }
-            else if (configurationText.StartsWith("<Configuration>")) // XML configuration.
+            else
+            {
+                var configuration = DeserializeConfiguration(await File.ReadAllTextAsync(localConfiguration));
+
+                if (configuration != null)
+                {
+                    configurations.Add(configuration);
+                }
+            }
+
+            return configurations;
+        }
+
+        /// <summary>
+        /// Deserialize a configuration.
+        /// </summary>
+        /// <param name="serializedConfiguration">The serialized configuration.</param>
+        /// <returns></returns>
+        private ConfigurationModel DeserializeConfiguration(string serializedConfiguration)
+        {
+            ConfigurationModel configuration;
+
+            if (serializedConfiguration.StartsWith("{")) // Json configuration.
+            {
+                configuration = JsonConvert.DeserializeObject<ConfigurationModel>(serializedConfiguration);
+            }
+            else if (serializedConfiguration.StartsWith("<Configuration>")) // XML configuration.
             {
                 var serializer = new XmlSerializer(typeof(ConfigurationModel));
-                using var reader = new StringReader(configurationText);
-                configuration = (ConfigurationModel) serializer.Deserialize(reader);
+                using var reader = new StringReader(serializedConfiguration);
+                configuration = (ConfigurationModel)serializer.Deserialize(reader);
             }
             else
             {
                 LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, "Configuration is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
-                return configurations; //TODO change to continue when configurations are loaded from Wiser.
+                return null;
             }
 
             using var scope = serviceProvider.CreateScope();
@@ -121,14 +148,11 @@ namespace AutoImportServiceCore.Core.Services
             // Only add configurations to run when they are valid.
             if (configurationsService.IsValidConfiguration(configuration))
             {
-                configurations.Add(configuration);
-            }
-            else
-            {
-                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
+                return configuration;
             }
 
-            return configurations;
+            LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
+            return null;
         }
 
         /// <summary>

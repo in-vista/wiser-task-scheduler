@@ -26,7 +26,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="baseWorkerDependencyAggregate"></param>
         public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            Initialize("Main", aisSettings.Value.MainRunScheme, true);
+            Initialize("Main", aisSettings.Value.MainService.RunScheme, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.mainService = mainService;

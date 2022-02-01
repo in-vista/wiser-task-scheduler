@@ -9,8 +9,8 @@ namespace AutoImportServiceCore.Core.Models
     public class AisSettings
     {
         /// <summary>
-        /// Gets or sets the run scheme for the <see cref="MainWorker"/>.
+        /// Gets or sets the settings of the <see cref="MainService"/>.
         /// </summary>
-        public RunSchemeModel MainRunScheme { get; set; }
+        public MainServiceSettings MainService { get; set; }
     }
 }

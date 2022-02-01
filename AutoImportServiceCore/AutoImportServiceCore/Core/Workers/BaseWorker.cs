@@ -76,7 +76,7 @@ namespace AutoImportServiceCore.Core.Workers
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} ran at: {DateTime.Now}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}");
 
                     var stopWatch = new Stopwatch();
                     stopWatch.Start();
