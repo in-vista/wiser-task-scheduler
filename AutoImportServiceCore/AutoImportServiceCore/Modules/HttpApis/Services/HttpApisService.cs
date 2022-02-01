@@ -46,7 +46,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             if (httpApi.SingleRequest)
             {
-                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet);
+                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0);
             }
 
             var jArray = new JArray();
@@ -54,7 +54,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             for (var i = 0; i < rows.Count; i++)
             {
-                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]"));
+                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i));
             }
 
             return new JObject
@@ -70,7 +70,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <param name="useResultSet">The result set to use for this execution.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet)
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row)
         {
             var url = httpApi.Url;
 
@@ -83,7 +83,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, htmlEncode: true);
                 url = tuple.Item1;
                 var parameterKeys = tuple.Item2;
-                url = ReplacementHelper.ReplaceText(url, 0, parameterKeys, usingResultSet, htmlEncode: true);
+                url = ReplacementHelper.ReplaceText(url, row, parameterKeys, usingResultSet, htmlEncode: true);
             }
 
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
@@ -117,12 +117,12 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                             // Replace body with values from first row.
                             if (bodyPart.SingleItem)
                             {
-                                body = ReplacementHelper.ReplaceText(body, 0, parameterKeys, (JObject)resultSets[bodyPart.UseResultSet]);
+                                body = ReplacementHelper.ReplaceText(body, row, parameterKeys, (JObject)resultSets[bodyPart.UseResultSet]);
                             }
                             // Replace and combine body with values for each row.
                             else
                             {
-                                body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, 0, resultSets));
+                                body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, row, resultSets));
                             }
                         }
                     }
