@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 using GeeksCoreLibrary.Core.Extensions;
 using Newtonsoft.Json.Linq;
 
@@ -37,8 +38,9 @@ namespace AutoImportServiceCore.Core.Helpers
 
                     var values = new List<string>();
                     var lastKeyIndex = key.LastIndexOf('.');
+                    var keyToArray = GetKeyToArray(remainingKey, key);
 
-                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>($"{(remainingKey.Length > 0 ? $"{remainingKey}." : "")}{key.Substring(0, lastKeyIndex)}", 0, usingResultSet);
+                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), 0, usingResultSet);
                     for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
                         values.Add(GetValue(key.Substring(lastKeyIndex + 1), i, (JObject)usingResultSetArray[i], mySqlSafe, htmlEncode));
@@ -59,6 +61,35 @@ namespace AutoImportServiceCore.Core.Helpers
             }
 
             return new Tuple<string, List<string>>(result, parameterKeys);
+        }
+
+        /// <summary>
+        /// Get the key to the array for a collection based on the remaining key and key.
+        /// </summary>
+        /// <param name="remainingKey">The remainder of they key (after the first .) of the using result set to be used for collections.</param>
+        /// <param name="key">The key of the parameter.</param>
+        /// <returns></returns>
+        private static string GetKeyToArray(string remainingKey, string key)
+        {
+            var lastKeyIndex = key.LastIndexOf('.');
+
+            var keyToArray = new StringBuilder();
+            if (!String.IsNullOrWhiteSpace(remainingKey))
+            {
+                keyToArray.Append(remainingKey);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(remainingKey) && lastKeyIndex > 0)
+            {
+                keyToArray.Append(".");
+            }
+
+            if (lastKeyIndex > 0)
+            {
+                keyToArray.Append(key.Substring(0, lastKeyIndex));
+            }
+
+            return keyToArray.ToString();
         }
 
         /// <summary>
