@@ -6,7 +6,6 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
-using BuckarooSdk.DataTypes.Response.Status;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;

@@ -24,6 +24,12 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         public string Method { get; set; }
 
         /// <summary>
+        /// Gets or sets if the HTTP API request needs to be requested once or more.
+        /// If false the using result set needs to be set to an array.
+        /// </summary>
+        public bool SingleRequest { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets additional headers to add before sending the request.
         /// </summary>
         [XmlArray("Headers")]

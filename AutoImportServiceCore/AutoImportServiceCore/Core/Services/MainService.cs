@@ -2,10 +2,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
@@ -17,7 +15,6 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Services
 {

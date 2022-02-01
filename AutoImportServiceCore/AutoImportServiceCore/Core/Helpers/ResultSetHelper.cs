@@ -20,7 +20,14 @@ namespace AutoImportServiceCore.Core.Helpers
             // No next step left, return object as requested type.
             if (keyParts.Length == 1)
             {
-                return (T)usingResultSet[keyParts[0]];
+                if (!key.EndsWith(']'))
+                {
+                    return (T) usingResultSet[key];
+                }
+
+                var arrayKey = key.Substring(0, key.IndexOf('['));
+                var indexKey = int.Parse(key.Substring(arrayKey.Length + 1, key.Length - arrayKey.Length - 2));
+                return (T) usingResultSet[arrayKey][indexKey];
             }
 
             var remainingKey = key.Substring(key.IndexOf(".") + 1);

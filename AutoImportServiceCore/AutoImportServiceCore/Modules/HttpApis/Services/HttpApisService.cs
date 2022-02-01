@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -41,22 +40,50 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <inheritdoc />
         public async Task<JObject> Execute(ActionModel action, JObject resultSets)
         {
-            var httpApi = (HttpApiModel)action;
+            var httpApi = (HttpApiModel) action;
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
 
+            if (httpApi.SingleRequest)
+            {
+                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet);
+            }
+
+            var jArray = new JArray();
+            var rows = ResultSetHelper.GetCorrectObject<JArray>(httpApi.UseResultSet, 0, resultSets);
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]"));
+            }
+
+            return new JObject
+            {
+                {"Results", jArray}
+            };
+        }
+
+        /// <summary>
+        /// Execute the HTTP API request.
+        /// </summary>
+        /// <param name="httpApi">The HTTP API action to execute.</param>
+        /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+        /// <param name="useResultSet">The result set to use for this execution.</param>
+        /// <returns></returns>
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet)
+        {
             var url = httpApi.Url;
 
             // If a result set needs to be used apply it on the url.
-            if (!String.IsNullOrWhiteSpace(httpApi.UseResultSet))
+            if (!String.IsNullOrWhiteSpace(useResultSet))
             {
-                var keyParts = httpApi.UseResultSet.Split('.');
-                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(keyParts[0], 0, resultSets);
-                var remainingKey = keyParts.Length > 1 ? httpApi.UseResultSet.Substring(keyParts[0].Length + 1) : "";
+                var keyParts = useResultSet.Split('.');
+                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, 0, resultSets);
+                var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
                 var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, htmlEncode: true);
                 url = tuple.Item1;
                 var parameterKeys = tuple.Item2;
-                url = ReplacementHelper.ReplaceText(url, 1, parameterKeys, usingResultSet, htmlEncode: true);
+                url = ReplacementHelper.ReplaceText(url, 0, parameterKeys, usingResultSet, htmlEncode: true);
             }
 
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
