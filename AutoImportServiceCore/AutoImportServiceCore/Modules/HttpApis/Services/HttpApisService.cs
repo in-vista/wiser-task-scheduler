@@ -167,6 +167,9 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 resultSet.Add("Body", responseBody);
             }
 
+            // Always add the body as plain text.
+            resultSet.Add("BodyPlainText", responseBody);
+
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}");
 
             return resultSet;
