@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 
-namespace AutoImportServiceCore.Core.Models
+namespace AutoImportServiceCore.Modules.Wiser.Models
 {
     /// <summary>
     /// A model for the response of the Wiser API login request.

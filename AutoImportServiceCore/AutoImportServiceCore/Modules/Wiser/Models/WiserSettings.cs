@@ -1,6 +1,7 @@
-﻿using AutoImportServiceCore.Core.Services;
+﻿using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Wiser.Services;
 
-namespace AutoImportServiceCore.Core.Models
+namespace AutoImportServiceCore.Modules.Wiser.Models
 {
     /// <summary>
     /// The settings for the connection to the Wiser API.
@@ -41,6 +42,11 @@ namespace AutoImportServiceCore.Core.Models
         /// Gets or sets if the AIS is running on a test environment.
         /// </summary>
         public bool TestEnvironment { get; set; }
+
+        /// <summary>
+        /// Gets or sets the path within the AIS folder from which the configurations are loaded.
+        /// </summary>
+        public string ConfigurationPath { get; set; }
 
         /// <summary>
         /// Gets or sets the <see cref="LogSettings"/> used by the <see cref="WiserService"/>.

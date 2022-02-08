@@ -11,6 +11,7 @@ using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -103,11 +104,13 @@ namespace AutoImportServiceCore.Core.Services
             
             if (String.IsNullOrWhiteSpace(localConfiguration))
             {
-                List<string> wiserConfigurations = await wiserService.RequestConfigurations();
+                var wiserConfigurations = await wiserService.RequestConfigurations();
 
                 foreach (var wiserConfiguration in wiserConfigurations)
                 {
-                    var configuration = DeserializeConfiguration(wiserConfiguration);
+                    if(String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
+
+                    var configuration = DeserializeConfiguration(wiserConfiguration.EditorValue, wiserConfiguration.Name);
 
                     if (configuration != null)
                     {
@@ -117,7 +120,7 @@ namespace AutoImportServiceCore.Core.Services
             }
             else
             {
-                var configuration = DeserializeConfiguration(await File.ReadAllTextAsync(localConfiguration));
+                var configuration = DeserializeConfiguration(await File.ReadAllTextAsync(localConfiguration), $"Local file {localConfiguration}");
 
                 if (configuration != null)
                 {
@@ -132,8 +135,9 @@ namespace AutoImportServiceCore.Core.Services
         /// Deserialize a configuration.
         /// </summary>
         /// <param name="serializedConfiguration">The serialized configuration.</param>
+        /// <param name="configurationFileName">The name of the configuration, either the template name of the file path.</param>
         /// <returns></returns>
-        private ConfigurationModel DeserializeConfiguration(string serializedConfiguration)
+        private ConfigurationModel DeserializeConfiguration(string serializedConfiguration, string configurationFileName)
         {
             ConfigurationModel configuration;
 
@@ -149,7 +153,7 @@ namespace AutoImportServiceCore.Core.Services
             }
             else
             {
-                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, "Configuration is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
+                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
                 return null;
             }
 

@@ -7,14 +7,15 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
-using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
+using AutoImportServiceCore.Modules.Wiser.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 
-namespace AutoImportServiceCore.Core.Services
+namespace AutoImportServiceCore.Modules.Wiser.Services
 {
     /// <inheritdoc cref="IWiserService"/> />
     public class WiserService : IWiserService, ISingletonService
@@ -124,13 +125,47 @@ namespace AutoImportServiceCore.Core.Services
         }
 
         /// <inheritdoc />
-        public async Task<List<string>> RequestConfigurations()
+        public async Task<List<TemplateSettingsModel>> RequestConfigurations()
         {
             return await Task.Run(() =>
             {
-                var a = AccesToken;
-                return new List<string>();
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}");
+                request.Headers.Add("Authorization", $"Bearer {AccesToken}");
+
+                using var client = new HttpClient();
+                var response = client.Send(request);
+
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
+                    return new List<TemplateSettingsModel>();
+                }
+
+                using var reader = new StreamReader(response.Content.ReadAsStream());
+                var body = reader.ReadToEnd();
+                var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
+
+                return FlattenTree(templateTrees);
             });
+        }
+
+        private List<TemplateSettingsModel> FlattenTree(List<TemplateTreeViewModel> templateTrees)
+        {
+            var results = new List<TemplateSettingsModel>();
+
+            foreach (var templateTree in templateTrees)
+            {
+                if (templateTree.HasChildren)
+                {
+                    results.AddRange(FlattenTree(templateTree.ChildNodes));
+                }
+                else
+                {
+                    results.Add(templateTree.TemplateSettings);
+                }
+            }
+
+            return results;
         }
     }
 }

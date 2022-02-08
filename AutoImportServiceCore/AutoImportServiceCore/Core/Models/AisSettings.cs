@@ -1,5 +1,4 @@
-﻿using AutoImportServiceCore.Core.Workers;
-using AutoImportServiceCore.Modules.RunSchemes.Models;
+﻿using AutoImportServiceCore.Modules.Wiser.Models;
 
 namespace AutoImportServiceCore.Core.Models
 {
