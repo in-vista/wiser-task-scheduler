@@ -1,0 +1,50 @@
+﻿using AutoImportServiceCore.Core.Services;
+
+namespace AutoImportServiceCore.Core.Models
+{
+    /// <summary>
+    /// The settings for the connection to the Wiser API.
+    /// </summary>
+    public class WiserSettings
+    {
+        /// <summary>
+        /// Gets or sets the username of the Wiser account.
+        /// </summary>
+        public string Username { get; set; }
+
+        /// <summary>
+        /// Gets or sets the password of the Wiser account.
+        /// </summary>
+        public string Password { get; set; }
+
+        /// <summary>
+        /// Gets or sets the subdomain of the Wiser account.
+        /// </summary>
+        public string Subdomain { get; set; }
+
+        /// <summary>
+        /// Gets or sets the url for the Wiser API.
+        /// </summary>
+        public string WiserApiUrl { get; set; }
+
+        /// <summary>
+        /// Gets or sets the id of the client.
+        /// </summary>
+        public string ClientId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the secret of the client.
+        /// </summary>
+        public string ClientSecret { get; set; }
+
+        /// <summary>
+        /// Gets or sets if the AIS is running on a test environment.
+        /// </summary>
+        public bool TestEnvironment { get; set; }
+
+        /// <summary>
+        /// Gets or sets the <see cref="LogSettings"/> used by the <see cref="WiserService"/>.
+        /// </summary>
+        public LogSettings LogSettings { get; set; }
+    }
+}

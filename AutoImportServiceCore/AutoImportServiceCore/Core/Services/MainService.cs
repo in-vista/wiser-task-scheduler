@@ -26,6 +26,7 @@ namespace AutoImportServiceCore.Core.Services
     {
         private readonly string localConfiguration;
         private readonly IServiceProvider serviceProvider;
+        private readonly IWiserService wiserService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>> activeConfigurations;
@@ -36,10 +37,11 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             this.serviceProvider = serviceProvider;
+            this.wiserService = wiserService;
             this.logger = logger;
 
             activeConfigurations = new ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>>();
@@ -101,7 +103,17 @@ namespace AutoImportServiceCore.Core.Services
             
             if (String.IsNullOrWhiteSpace(localConfiguration))
             {
-                throw new NotImplementedException();
+                List<string> wiserConfigurations = await wiserService.RequestConfigurations();
+
+                foreach (var wiserConfiguration in wiserConfigurations)
+                {
+                    var configuration = DeserializeConfiguration(wiserConfiguration);
+
+                    if (configuration != null)
+                    {
+                        configurations.Add(configuration);
+                    }
+                }
             }
             else
             {
