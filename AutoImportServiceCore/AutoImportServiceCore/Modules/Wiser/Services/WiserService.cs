@@ -107,21 +107,28 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             LogHelper.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}");
             
             using var client = new HttpClient();
-            var response = client.Send(request);
-            if (response.StatusCode != HttpStatusCode.OK)
+            try
             {
-                LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.");
-                return;
+                var response = client.Send(request);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.");
+                    return;
+                }
+
+                using var reader = new StreamReader(response.Content.ReadAsStream());
+                var body = reader.ReadToEnd();
+                LogHelper.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}");
+                var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
+
+                accessToken = wiserLoginResponse.AccessToken;
+                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn);
+                refreshToken = wiserLoginResponse.RefreshToken;
             }
-            
-            using var reader = new StreamReader(response.Content.ReadAsStream());
-            var body = reader.ReadToEnd();
-            LogHelper.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}");
-            var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
-            
-            accessToken = wiserLoginResponse.AccessToken;
-            accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn);
-            refreshToken = wiserLoginResponse.RefreshToken;
+            catch (Exception e)
+            {
+                LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}");
+            }
         }
 
         /// <inheritdoc />
@@ -133,19 +140,28 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 request.Headers.Add("Authorization", $"Bearer {AccesToken}");
 
                 using var client = new HttpClient();
-                var response = client.Send(request);
-
-                if (response.StatusCode != HttpStatusCode.OK)
+                try
                 {
-                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
-                    return new List<TemplateSettingsModel>();
+                    var response = client.Send(request);
+
+                    if (response.StatusCode != HttpStatusCode.OK)
+                    {
+                        LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
+                        return null;
+                    }
+
+                    using var reader = new StreamReader(response.Content.ReadAsStream());
+                    var body = reader.ReadToEnd();
+                    var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
+
+                    return FlattenTree(templateTrees);
                 }
-
-                using var reader = new StreamReader(response.Content.ReadAsStream());
-                var body = reader.ReadToEnd();
-                var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
-
-                return FlattenTree(templateTrees);
+                catch (Exception e)
+                {
+                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}");
+                    return null;
+                }
+                
             });
         }
 

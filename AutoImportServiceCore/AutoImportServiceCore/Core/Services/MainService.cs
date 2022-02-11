@@ -53,6 +53,11 @@ namespace AutoImportServiceCore.Core.Services
         {
             var configurations = await GetConfigurations();
 
+            if (configurations == null)
+            {
+                return;
+            }
+
             foreach (var configuration in configurations)
             {
                 if (activeConfigurations.ContainsKey(configuration.ServiceName))
@@ -105,6 +110,11 @@ namespace AutoImportServiceCore.Core.Services
             if (String.IsNullOrWhiteSpace(localConfiguration))
             {
                 var wiserConfigurations = await wiserService.RequestConfigurations();
+
+                if (wiserConfigurations == null)
+                {
+                    return null;
+                }
 
                 foreach (var wiserConfiguration in wiserConfigurations)
                 {
