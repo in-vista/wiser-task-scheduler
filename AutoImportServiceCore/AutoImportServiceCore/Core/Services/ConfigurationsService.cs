@@ -23,6 +23,8 @@ namespace AutoImportServiceCore.Core.Services
         private readonly SortedList<int, ActionModel> actions;
         private readonly Dictionary<string, IActionsService> actionsServices;
 
+        private string configurationServiceName;
+
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
@@ -46,6 +48,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public void ExtractActionsFromConfiguration(int timeId, ConfigurationModel configuration)
         {
+            configurationServiceName = configuration.ServiceName;
             var allActions = GetAllActionsFromConfiguration(configuration);
 
             foreach (ActionModel action in allActions.Where(action => action.TimeId == timeId))
@@ -61,7 +64,7 @@ namespace AutoImportServiceCore.Core.Services
                 }
             }
 
-            LogHelper.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).");
+            LogHelper.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
         }
 
         /// <summary>
@@ -112,7 +115,7 @@ namespace AutoImportServiceCore.Core.Services
             if (duplicateTimeIds.Count > 0)
             {
                 conflicts++;
-                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}");
+                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}", configuration.ServiceName);
             }
 
             // Check for duplicate order in a single time id.
@@ -125,7 +128,7 @@ namespace AutoImportServiceCore.Core.Services
                 if (duplicateOrders.Count > 0)
                 {
                     conflicts++;
-                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}");
+                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
                 }
             }
 
@@ -144,7 +147,7 @@ namespace AutoImportServiceCore.Core.Services
                     continue;
                 }
 
-                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets);
+                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets, configurationServiceName);
 
                 if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
                 {

@@ -38,7 +38,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         public async Task Initialize(ConfigurationModel configuration) { }
 
         /// <inheritdoc />
-        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
             var httpApi = (HttpApiModel) action;
 

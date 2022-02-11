@@ -2,6 +2,7 @@
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.Logging;
+using Serilog.Context;
 
 namespace AutoImportServiceCore.Core.Helpers
 {
@@ -15,9 +16,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message)
+        public static void LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
-            Log(logger, LogLevel.Debug, logScope, logSettings, message);
+            Log(logger, LogLevel.Debug, logScope, logSettings, message, configurationName, timeId, order);
         }
 
         /// <summary>
@@ -28,9 +29,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message)
+        public static void LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
-            Log(logger, LogLevel.Information, logScope, logSettings, message);
+            Log(logger, LogLevel.Information, logScope, logSettings, message, configurationName, timeId, order);
         }
 
         /// <summary>
@@ -41,9 +42,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message)
+        public static void LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
-            Log(logger, LogLevel.Warning, logScope, logSettings, message);
+            Log(logger, LogLevel.Warning, logScope, logSettings, message, configurationName, timeId, order);
         }
 
         /// <summary>
@@ -54,9 +55,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message)
+        public static void LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
-            Log(logger, LogLevel.Error, logScope, logSettings, message);
+            Log(logger, LogLevel.Error, logScope, logSettings, message, configurationName, timeId, order);
         }
 
         /// <summary>
@@ -67,9 +68,9 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message)
+        public static void LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
-            Log(logger, LogLevel.Critical, logScope, logSettings, message);
+            Log(logger, LogLevel.Critical, logScope, logSettings, message, configurationName, timeId, order);
         }
 
         /// <summary>
@@ -81,7 +82,7 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="logScope">The scope of the message of log.</param>
         /// <param name="logSettings">The log settings of the caller.</param>
         /// <param name="message">The message to log.</param>
-        public static void Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message)
+        public static void Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1)
         {
             if (logLevel < logSettings.LogMinimumLevel)
             {
@@ -94,8 +95,13 @@ namespace AutoImportServiceCore.Core.Helpers
                 case LogScopes.StartAndStop when logSettings.LogStartAndStop || logLevel > LogLevel.Information:
                 case LogScopes.RunStartAndStop when logSettings.LogRunStartAndStop || logLevel > LogLevel.Information:
                 case LogScopes.RunBody when logSettings.LogRunBody || logLevel > LogLevel.Information:
+                {
+                    using var configurationServiceNameDisposable = LogContext.PushProperty("configuration_service_name", configurationName);
+                    using var timeIdDisposable = LogContext.PushProperty("time_id", timeId);
+                    using var orderDisposable = LogContext.PushProperty("order", order);
                     logger.Log(logLevel, message);
                     break;
+                }
 
                 // Stop when the scope is evaluated above but is not allowed to log, to prevent the default exception to be thrown.
                 case LogScopes.StartAndStop:

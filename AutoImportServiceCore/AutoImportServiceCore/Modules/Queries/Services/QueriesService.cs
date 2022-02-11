@@ -41,7 +41,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         }
 
         /// <inheritdoc />
-        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
             var query = (QueryModel)action;
 
