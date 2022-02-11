@@ -19,6 +19,11 @@ namespace AutoImportServiceCore.Core.Models
         public string ServiceName { get; set; }
 
         /// <summary>
+        /// Version will be automatically set, either to the template version or the ticks of the last write time for a local file.
+        /// </summary>
+        public long Version { get; set; }
+
+        /// <summary>
         /// Gets or sets the connection string that is used for queries.
         /// </summary>
         public string ConnectionString { get; set; }
