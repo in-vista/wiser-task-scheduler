@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
@@ -13,6 +14,7 @@ using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -30,7 +32,7 @@ namespace AutoImportServiceCore.Core.Services
         private readonly IWiserService wiserService;
         private readonly ILogger<MainService> logger;
 
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>> activeConfigurations;
+        private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -45,7 +47,7 @@ namespace AutoImportServiceCore.Core.Services
             this.wiserService = wiserService;
             this.logger = logger;
 
-            activeConfigurations = new ConcurrentDictionary<string, ConcurrentDictionary<int, ConfigurationsWorker>>();
+            activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
         }
 
         /// <inheritdoc />
@@ -62,10 +64,23 @@ namespace AutoImportServiceCore.Core.Services
             {
                 if (activeConfigurations.ContainsKey(configuration.ServiceName))
                 {
-                    continue;
+                    // If configuration is already running on the same version skip it.
+                    if (activeConfigurations[configuration.ServiceName].Version == configuration.Version)
+                    {
+                        continue;
+                    }
+
+                    // If the configuration is already running but on a different version stop the current active one.
+                    var configurationStopTasks = StopConfiguration(configuration.ServiceName);
+                    await WaitTillConfigurationsStopped(configurationStopTasks);
+                    activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(configuration.ServiceName, activeConfigurations[configuration.ServiceName]));
                 }
 
-                activeConfigurations.TryAdd(configuration.ServiceName, new ConcurrentDictionary<int, ConfigurationsWorker>());
+                activeConfigurations.TryAdd(configuration.ServiceName, new ActiveConfigurationModel()
+                {
+                    Version = configuration.Version,
+                    WorkerPerTimeId = new ConcurrentDictionary<int, ConfigurationsWorker>()
+                });
                 
                 foreach (var runScheme in configuration.RunSchemes)
                 {
@@ -75,23 +90,55 @@ namespace AutoImportServiceCore.Core.Services
                     thread.Start();
                 }
             }
+            
+            await StopRemovedConfigurations(configurations);
+        }
+
+        private async Task StopRemovedConfigurations(List<ConfigurationModel> configurations)
+        {
+            foreach (var activeConfiguration in activeConfigurations)
+            {
+                if (configurations.Any(configuration => configuration.ServiceName.Equals(activeConfiguration.Key)))
+                {
+                    continue;
+                }
+
+                var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
+                await WaitTillConfigurationsStopped(configurationStopTasks);
+                activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
+            }
         }
 
         /// <inheritdoc />
         public async Task StopAllConfigurations()
         {
-            List<Task> configurationStopTasks = new List<Task>();
-            var cancellationToken = new CancellationToken();
+            var configurationStopTasks = new List<Task>();
 
             foreach (var configuration in activeConfigurations)
             {
-                foreach (var worker in configuration.Value)
-                {
-                    configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
-                }
+                configurationStopTasks.AddRange(StopConfiguration(configuration.Key));
             }
-            
-            for(var i = 0; i < configurationStopTasks.Count; i++)
+
+            await WaitTillConfigurationsStopped(configurationStopTasks);
+        }
+
+        private List<Task> StopConfiguration(string configurationName)
+        {
+            var configurationStopTasks = new List<Task>();
+            var cancellationToken = new CancellationToken();
+
+            // If the configuration is already running but on a different version stop the current active one.
+            foreach (var worker in activeConfigurations[configurationName].WorkerPerTimeId)
+            {
+                configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
+            }
+
+            return configurationStopTasks;
+        }
+
+        private async Task WaitTillConfigurationsStopped(List<Task> configurationStopTasks)
+        {
+            for (var i = 0; i < configurationStopTasks.Count; i++)
             {
                 await configurationStopTasks[i];
 
@@ -103,7 +150,7 @@ namespace AutoImportServiceCore.Core.Services
         /// Retrieve all configurations.
         /// </summary>
         /// <returns>Returns the configurations</returns>
-        private async Task<IEnumerable<ConfigurationModel>> GetConfigurations()
+        private async Task<List<ConfigurationModel>> GetConfigurations()
         {
             var configurations = new List<ConfigurationModel>();
             
@@ -124,6 +171,7 @@ namespace AutoImportServiceCore.Core.Services
 
                     if (configuration != null)
                     {
+                        configuration.Version = wiserConfiguration.Version;
                         configurations.Add(configuration);
                     }
                 }
@@ -134,6 +182,7 @@ namespace AutoImportServiceCore.Core.Services
 
                 if (configuration != null)
                 {
+                    configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
                     configurations.Add(configuration);
                 }
             }
@@ -188,14 +237,12 @@ namespace AutoImportServiceCore.Core.Services
         /// <param name="configuration">The configuration the run scheme is within.</param>
         private async void StartConfiguration(RunSchemeModel runScheme, ConfigurationModel configuration)
         {
-            using (var scope = serviceProvider.CreateScope())
-            {
-                var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
-                worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
-                activeConfigurations[configuration.ServiceName].TryAdd(runScheme.TimeId, worker);
-                await worker.StartAsync(new CancellationToken());
-                await worker.ExecuteTask; // Keep scope alive until worker stops.
-            }
+            using var scope = serviceProvider.CreateScope();
+            var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
+            worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
+            activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
+            await worker.StartAsync(new CancellationToken());
+            await worker.ExecuteTask; // Keep scope alive until worker stops.
         }
     }
 }
