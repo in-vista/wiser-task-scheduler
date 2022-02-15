@@ -212,7 +212,7 @@ namespace AutoImportServiceCore.Core.Services
             }
             else
             {
-                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
+                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
                 return null;
             }
 
@@ -226,7 +226,7 @@ namespace AutoImportServiceCore.Core.Services
                 return configuration;
             }
 
-            LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
+            LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
             return null;
         }
 

@@ -49,13 +49,14 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <returns></returns>
         private string GetAccessToken()
         {
+            // Lock to prevent multiple requests at once.
             lock (accessToken)
             {
                 if (String.IsNullOrWhiteSpace(accessToken))
                 {
                     Login();
                 }
-                else if (accessTokenExpireTime < DateTime.Now)
+                else if (accessTokenExpireTime <= DateTime.Now)
                 {
                     if (String.IsNullOrWhiteSpace(refreshToken))
                     {
@@ -74,7 +75,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccesToken"/> or <see cref="GetAccessToken"/>.
+        /// This method is called when using <see cref="AccesToken"/> or <see cref="GetAccessToken"/> with a lock.
         /// </summary>
         private void Login(bool useRefreshToken = false)
         {
@@ -122,7 +123,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
                 accessToken = wiserLoginResponse.AccessToken;
-                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn);
+                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn).AddMinutes(-1); // Refresh 1 minute before expire.
                 refreshToken = wiserLoginResponse.RefreshToken;
             }
             catch (Exception e)
@@ -134,6 +135,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <inheritdoc />
         public async Task<List<TemplateSettingsModel>> RequestConfigurations()
         {
+            // Lock cannot be used inside an async function. This way we can wait till the request has completed.
             return await Task.Run(() =>
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}");
@@ -161,7 +163,6 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                     LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}");
                     return null;
                 }
-                
             });
         }
 

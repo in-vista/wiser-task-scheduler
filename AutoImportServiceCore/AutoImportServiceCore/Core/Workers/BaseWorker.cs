@@ -67,7 +67,7 @@ namespace AutoImportServiceCore.Core.Workers
         {
             try
             {
-                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}");
+                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
 
                 if (!RunImmediately)
                 {
@@ -76,7 +76,7 @@ namespace AutoImportServiceCore.Core.Workers
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
 
                     var stopWatch = new Stopwatch();
                     stopWatch.Start();
@@ -85,18 +85,18 @@ namespace AutoImportServiceCore.Core.Workers
 
                     stopWatch.Stop();
 
-                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
 
                     await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.");
+                LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.", Name, RunScheme.TimeId);
             }
             catch (Exception e)
             {
-                LogHelper.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}");
+                LogHelper.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
             }
         }
 

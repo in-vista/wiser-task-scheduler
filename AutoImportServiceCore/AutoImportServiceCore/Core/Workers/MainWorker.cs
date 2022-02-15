@@ -44,9 +44,9 @@ namespace AutoImportServiceCore.Core.Workers
         /// <inheritdoc />
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.");
+            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
             await mainService.StopAllConfigurations();
-            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.");
+            LogHelper.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
             await base.StopAsync(cancellationToken);
         }
     }
