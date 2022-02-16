@@ -18,6 +18,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
     /// </summary>
     public class QueriesService : IQueriesService, IActionsService, IScopedService
     {
+        private readonly ILogService logService;
         private readonly ILogger<QueriesService> logger;
         private readonly AisDatabaseConnection databaseConnection;
 
@@ -26,10 +27,12 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <summary>
         /// Creates a new instance of <see cref="QueriesService"/>.
         /// </summary>
+        /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
         /// <param name="databaseConnection"></param>
-        public QueriesService(ILogger<QueriesService> logger, AisDatabaseConnection databaseConnection)
+        public QueriesService(ILogService logService, ILogger<QueriesService> logger, AisDatabaseConnection databaseConnection)
         {
+            this.logService = logService;
             this.logger = logger;
             this.databaseConnection = databaseConnection;
         }
@@ -45,12 +48,12 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         {
             var query = (QueryModel)action;
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}");
+            logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
 
             // If not using a result set execute the query as given.
             if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
-                LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}");
+                logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}", configurationServiceName, query.TimeId, query.Order);
                 return await databaseConnection.ExecuteQuery(connectionString, query.Query);
             }
 
@@ -60,7 +63,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}");
+            logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}", configurationServiceName, query.TimeId, query.Order);
 
             // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
             if (parameterKeys.Count == 0)

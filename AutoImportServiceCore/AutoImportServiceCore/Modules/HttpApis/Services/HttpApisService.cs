@@ -23,14 +23,17 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
     /// </summary>
     public class HttpApisService : IHttpApisService, IActionsService, IScopedService
     {
+        private readonly ILogService logService;
         private readonly ILogger<HttpApisService> logger;
 
         /// <summary>
         /// Creates a new instance of <see cref="HttpApisService"/>.
         /// </summary>
+        /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
-        public HttpApisService(ILogger<HttpApisService> logger)
+        public HttpApisService(ILogService logService, ILogger<HttpApisService> logger)
         {
+            this.logService = logService;
             this.logger = logger;
         }
 
@@ -42,11 +45,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         {
             var httpApi = (HttpApiModel) action;
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
+            logService.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}", configurationServiceName, httpApi.TimeId, httpApi.Order);
 
             if (httpApi.SingleRequest)
             {
-                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0);
+                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0, configurationServiceName);
             }
 
             var jArray = new JArray();
@@ -54,7 +57,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             for (var i = 0; i < rows.Count; i++)
             {
-                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i));
+                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i, configurationServiceName));
             }
 
             return new JObject
@@ -71,7 +74,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="useResultSet">The result set to use for this execution.</param>
         /// <param name="row">The index/row of the array, passed to be used if '[i]' is used in the key.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row)
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row, string configurationServiceName)
         {
             var url = httpApi.Url;
 
@@ -87,14 +90,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 url = ReplacementHelper.ReplaceText(url, row, parameterKeys, usingResultSet, htmlEncode: true);
             }
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
+            logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order);
             var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), url);
 
             foreach (var header in httpApi.Headers)
             {
                 request.Headers.Add(header.Name, header.Value);
             }
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}");
+            logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order);
             
             if (httpApi.Body != null)
             {
@@ -131,7 +134,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     finalBody.Append(body);
                 }
 
-                LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{finalBody}");
+                logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{finalBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
                 request.Content = new StringContent(finalBody.ToString())
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
@@ -170,7 +173,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             // Always add the body as plain text.
             resultSet.Add("BodyPlainText", responseBody);
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}");
+            logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
 
             return resultSet;
         }

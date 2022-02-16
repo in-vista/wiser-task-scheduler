@@ -17,6 +17,7 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class ConfigurationsService : IConfigurationsService, IScopedService
     {
+        private readonly ILogService logService;
         private readonly ILogger<ConfigurationsService> logger;
         private readonly IActionsServiceFactory actionsServiceFactory;
 
@@ -34,10 +35,12 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsService"/>.
         /// </summary>
+        /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
         /// <param name="actionsServiceFactory"></param>
-        public ConfigurationsService(ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory)
+        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory)
         {
+            this.logService = logService;
             this.logger = logger;
             this.actionsServiceFactory = actionsServiceFactory;
 
@@ -64,7 +67,7 @@ namespace AutoImportServiceCore.Core.Services
                 }
             }
 
-            LogHelper.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
+            logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
         }
 
         /// <summary>
@@ -115,7 +118,7 @@ namespace AutoImportServiceCore.Core.Services
             if (duplicateTimeIds.Count > 0)
             {
                 conflicts++;
-                LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}", configuration.ServiceName);
+                logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}", configuration.ServiceName);
             }
 
             // Check for duplicate order in a single time id.
@@ -128,7 +131,7 @@ namespace AutoImportServiceCore.Core.Services
                 if (duplicateOrders.Count > 0)
                 {
                     conflicts++;
-                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
+                    logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
                 }
             }
 

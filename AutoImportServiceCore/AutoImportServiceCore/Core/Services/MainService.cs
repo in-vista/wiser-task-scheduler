@@ -7,14 +7,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -30,6 +28,7 @@ namespace AutoImportServiceCore.Core.Services
         private readonly string localConfiguration;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
+        private readonly ILogService logService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
@@ -40,8 +39,9 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, ILogService logService, ILogger<MainService> logger)
         {
+            this.logService = logService;
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
@@ -142,7 +142,7 @@ namespace AutoImportServiceCore.Core.Services
             {
                 await configurationStopTasks[i];
 
-                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
+                logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
             }
         }
 
@@ -212,7 +212,7 @@ namespace AutoImportServiceCore.Core.Services
             }
             else
             {
-                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
+                logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
                 return null;
             }
 
@@ -226,7 +226,7 @@ namespace AutoImportServiceCore.Core.Services
                 return configuration;
             }
 
-            LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
+            logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
             return null;
         }
 
