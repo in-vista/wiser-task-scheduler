@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
@@ -8,6 +9,7 @@ using AutoImportServiceCore.Core.Services;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Helpers;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -56,16 +58,17 @@ namespace AutoImportServiceCore.Modules.Queries.Services
 
             var keyParts = query.UseResultSet.Split('.');
             var remainingKey = keyParts.Length > 1 ? query.UseResultSet.Substring(keyParts[0].Length + 1) : "";
-            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, mySqlSafe: true);
+            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, insertValues: false);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
+            var insertedParameters = tuple.Item3;
 
             LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}");
 
             // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
             if (parameterKeys.Count == 0)
             {
-                return await databaseConnection.ExecuteQuery(connectionString, queryString);
+                return await databaseConnection.ExecuteQuery(connectionString, queryString, insertedParameters);
             }
 
             var jArray = new JArray();
@@ -74,9 +77,17 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var usingResultSet = ResultSetHelper.GetCorrectObject<JArray>(query.UseResultSet, 0, resultSets);
             for (var i = 0; i < usingResultSet.Count; i++)
             {
-                var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, (JObject)usingResultSet[i], mySqlSafe: true);
+                //var queryStringWithValues = ReplacementHelper.ReplaceText(queryString, i, parameterKeys, (JObject)usingResultSet[i], mySqlSafe: true);
+                var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
-                jArray.Add(await databaseConnection.ExecuteQuery(connectionString, queryStringWithValues));
+                foreach (var key in parameterKeys)
+                {
+                    var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                    var value = ReplacementHelper.GetValue(key, i, (JObject)usingResultSet[i], false);
+                    parameters.Add(new KeyValuePair<string, string>(parameterName, value));
+                }
+
+                jArray.Add(await databaseConnection.ExecuteQuery(connectionString, queryString, parameters));
             }
 
             return new JObject

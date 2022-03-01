@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Helpers;
 using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Helpers
@@ -13,17 +14,20 @@ namespace AutoImportServiceCore.Core.Helpers
         /// The final string is returned in Item 1.
         /// Replaces parameter placeholders with an easy accessible name and stores that name in a list that is returned in Item 2.
         /// If a parameter is a collection it is replaced by a comma separated value directly.
+        /// If a parameter is a single value it is replaced directly.
+        /// If <see cref="insertValues"/> is set to false it will be replaced by a parameter '?{key}' and a list of keys and values will be returned in Item 3.
         /// </summary>
         /// <param name="originalString">The string to prepare.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="remainingKey">The remainder of they key (after the first .) to be used for collections.</param>
-        /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
+        /// <param name="insertValues">Insert values directly if it is a collection or a single value. Otherwise it will be replaced by a parameter '?{key}' and the value will be returned with the key in Item 3.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static Tuple<string, List<string>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, bool mySqlSafe = false, bool htmlEncode = false)
+        public static Tuple<string, List<string>, List<KeyValuePair<string, string>>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, bool insertValues = true, bool htmlEncode = false)
         {
             var result = originalString;
             var parameterKeys = new List<string>();
+            var insertedParameters = new List<KeyValuePair<string, string>>();
 
             while (result.Contains("[{") && result.Contains("}]"))
             {
@@ -43,24 +47,44 @@ namespace AutoImportServiceCore.Core.Helpers
                     var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), 0, usingResultSet);
                     for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
-                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), i, (JObject)usingResultSetArray[i], mySqlSafe, htmlEncode));
+                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), i, (JObject)usingResultSetArray[i], htmlEncode));
                     }
 
-                    result = result.Replace($"[{{{key}[]}}]", String.Join(",", values));
+                    if (insertValues)
+                    {
+                        result = result.Replace($"[{{{key}[]}}]", String.Join(",", values));
+                    }
+                    else
+                    {
+                        var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                        result = result.Replace($"[{{{key}[]}}]", $"?{parameterName}");
+                        insertedParameters.Add(new KeyValuePair<string, string>(parameterName, String.Join(',', values)));
+                    }
                 }
                 else if (key.Contains("<>"))
                 {
                     key = key.Replace("<>", "");
-                    result = result.Replace($"[{{{key}<>}}]", GetValue(key, 0, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, 0, usingResultSet), mySqlSafe, htmlEncode));
+                    var value = GetValue(key, 0, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, 0, usingResultSet), htmlEncode);
+                    if (insertValues)
+                    {
+                        result = result.Replace($"[{{{key}<>}}]", value);
+                    }
+                    else
+                    {
+                        var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                        result = result.Replace($"[{{{key}<>}}]", $"?{key.Replace("[]", "")}");
+                        insertedParameters.Add(new KeyValuePair<string, string>(key.Replace("[]", ""), value));
+                    }
                 }
                 else
                 {
-                    result = result.Replace($"[{{{key}}}]", $"?{key}");
+                    var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                    result = result.Replace($"[{{{key}}}]", $"?{parameterName}");
                     parameterKeys.Add(key);
                 }
             }
 
-            return new Tuple<string, List<string>>(result, parameterKeys);
+            return new Tuple<string, List<string>, List<KeyValuePair<string, string>>>(result, parameterKeys, insertedParameters);
         }
 
         /// <summary>
@@ -99,16 +123,16 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="row">The row to use the values from.</param>
         /// <param name="parameterKeys">The keys of the parameters to replace.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
-        /// <param name="mySqlSafe">If the values from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, JObject usingResultSet, bool mySqlSafe = false, bool htmlEncode = false)
+        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, JObject usingResultSet, bool htmlEncode = false)
         {
             var result = originalString;
             
             foreach (var key in parameterKeys)
             {
-                result = result.Replace($"?{key}", GetValue(key, row, usingResultSet, mySqlSafe, htmlEncode));
+                var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                result = result.Replace($"?{parameterName}", GetValue(key, row, usingResultSet, htmlEncode));
             }
 
             return result;
@@ -120,17 +144,11 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <param name="key">The key to get the value from.</param>
         /// <param name="row">The row to get the value from.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
-        /// <param name="mySqlSafe">If the value from the result set needs to be safe for MySQL.</param>
         /// <param name="htmlEncode">If the value from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        private static string GetValue(string key, int row, JObject usingResultSet, bool mySqlSafe, bool htmlEncode)
+        public static string GetValue(string key, int row, JObject usingResultSet, bool htmlEncode)
         {
             var value = (string)ResultSetHelper.GetCorrectObject<JValue>(key, row, usingResultSet);
-
-            if (mySqlSafe)
-            {
-                value = value.ToMySqlSafeValue();
-            }
 
             if (htmlEncode)
             {
