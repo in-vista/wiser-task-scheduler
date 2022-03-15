@@ -49,14 +49,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             {
                 if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
                 {
-                    return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0);
+                    return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows);
                 }
 
                 var url = httpApi.Url;
                 do
                 {
-                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0, url);
-                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", 0, result, false);
+                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, url);
+                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                     jArray.Add(result);
                 } while (!String.IsNullOrWhiteSpace(url));
 
@@ -66,21 +66,23 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 };
             }
 
-            var rows = ResultSetHelper.GetCorrectObject<JArray>(httpApi.UseResultSet, 0, resultSets);
+            var rows = ResultSetHelper.GetCorrectObject<JArray>(httpApi.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
 
             for (var i = 0; i < rows.Count; i++)
             {
+                var indexRows = new List<int> {i};
+
                 if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
                 {
-                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i));
+                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", indexRows));
                 }
                 else
                 {
                     var url = httpApi.Url;
                     do
                     {
-                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i, url);
-                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", 0, result, false);
+                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, url);
+                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));
                 }
@@ -98,10 +100,10 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="httpApi">The HTTP API action to execute.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <param name="useResultSet">The result set to use for this execution.</param>
-        /// <param name="row">The index/row of the array, passed to be used if '[i]' is used in the key.</param>
+        /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="overrideUrl">The url to use instead of the provided url, used for continuous calls with a next URL.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row, string overrideUrl = "")
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string overrideUrl = "")
         {
             var url = String.IsNullOrWhiteSpace(overrideUrl) ? httpApi.Url : overrideUrl;
 
@@ -109,12 +111,12 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             if (!String.IsNullOrWhiteSpace(useResultSet))
             {
                 var keyParts = useResultSet.Split('.');
-                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, 0, resultSets);
+                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
                 var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, htmlEncode: true);
                 url = tuple.Item1;
                 var parameterKeys = tuple.Item2;
-                url = ReplacementHelper.ReplaceText(url, row, parameterKeys, usingResultSet, htmlEncode: true);
+                url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, htmlEncode: true);
             }
 
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
@@ -130,10 +132,10 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 else
                 {
                     var keyParts = header.UseResultSet.Split('.');
-                    var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, 0, resultSets);
+                    var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
                     var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
                     var tuple = ReplacementHelper.PrepareText(header.Value, usingResultSet, remainingKey);
-                    var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, row, tuple.Item2, usingResultSet) : tuple.Item1;
+                    var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet) : tuple.Item1;
                     request.Headers.Add(header.Name, headerValue);
                 }
             }
@@ -161,12 +163,12 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                             // Replace body with values from first row.
                             if (bodyPart.SingleItem)
                             {
-                                body = ReplacementHelper.ReplaceText(body, row, parameterKeys, (JObject)resultSets[bodyPart.UseResultSet]);
+                                body = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject)resultSets[bodyPart.UseResultSet]);
                             }
                             // Replace and combine body with values for each row.
                             else
                             {
-                                body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, row, resultSets));
+                                body = GenerateBodyCollection(body, httpApi.Body.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, rows, resultSets));
                             }
                         }
                     }
@@ -243,7 +245,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             // Perform the query for each row in the result set that is being used.
             for (var i = 0; i < usingResultSet.Count; i++)
             {
-                var bodyWithValues = ReplacementHelper.ReplaceText(body, i, parameterKeys, (JObject)usingResultSet[i]);
+                var bodyWithValues = ReplacementHelper.ReplaceText(body, new List<int>() {i}, parameterKeys, (JObject)usingResultSet[i]);
                 bodyCollection.Append($"{(i > 0 ? separator : "")}{bodyWithValues}");
             }
 
