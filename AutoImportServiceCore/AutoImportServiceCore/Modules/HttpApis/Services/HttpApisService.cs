@@ -41,20 +41,49 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         public async Task<JObject> Execute(ActionModel action, JObject resultSets)
         {
             var httpApi = (HttpApiModel) action;
+            var jArray = new JArray();
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
 
             if (httpApi.SingleRequest)
             {
-                return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0);
+                if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
+                {
+                    return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0);
+                }
+
+                var url = httpApi.Url;
+                do
+                {
+                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, 0, url);
+                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", 0, result, false);
+                    jArray.Add(result);
+                } while (!String.IsNullOrWhiteSpace(url));
+
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
             }
 
-            var jArray = new JArray();
             var rows = ResultSetHelper.GetCorrectObject<JArray>(httpApi.UseResultSet, 0, resultSets);
 
             for (var i = 0; i < rows.Count; i++)
             {
-                jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i));
+                if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
+                {
+                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i));
+                }
+                else
+                {
+                    var url = httpApi.Url;
+                    do
+                    {
+                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", i, url);
+                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", 0, result, false);
+                        jArray.Add(result);
+                    } while (!String.IsNullOrWhiteSpace(url));
+                }
             }
 
             return new JObject
@@ -70,10 +99,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <param name="useResultSet">The result set to use for this execution.</param>
         /// <param name="row">The index/row of the array, passed to be used if '[i]' is used in the key.</param>
+        /// <param name="overrideUrl">The url to use instead of the provided url, used for continuous calls with a next URL.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row)
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, int row, string overrideUrl = "")
         {
-            var url = httpApi.Url;
+            var url = String.IsNullOrWhiteSpace(overrideUrl) ? httpApi.Url : overrideUrl;
 
             // If a result set needs to be used apply it on the url.
             if (!String.IsNullOrWhiteSpace(useResultSet))
