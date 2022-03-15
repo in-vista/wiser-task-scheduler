@@ -20,5 +20,10 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// </summary>
         [Required]
         public string Value { get; set; }
+
+        /// <summary>
+        /// Gets or sets the result set to use for replacements.
+        /// </summary>
+        public string UseResultSet { get; set; }
     }
 }

@@ -92,7 +92,20 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             foreach (var header in httpApi.Headers)
             {
-                request.Headers.Add(header.Name, header.Value);
+                if (string.IsNullOrWhiteSpace(header.UseResultSet))
+                {
+                    request.Headers.Add(header.Name, header.Value);
+                }
+                // If a result set is used for the header apply it to the value.
+                else
+                {
+                    var keyParts = header.UseResultSet.Split('.');
+                    var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, 0, resultSets);
+                    var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
+                    var tuple = ReplacementHelper.PrepareText(header.Value, usingResultSet, remainingKey);
+                    var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, row, tuple.Item2, usingResultSet) : tuple.Item1;
+                    request.Headers.Add(header.Name, headerValue);
+                }
             }
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}");
             
