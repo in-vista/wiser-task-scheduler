@@ -9,6 +9,9 @@ namespace AutoImportServiceCore.Core.Helpers
 {
     public static class ReplacementHelper
     {
+        private static readonly List<int> emptyRows = new List<int>() {0, 0};
+        public static List<int> EmptyRows => emptyRows;
+
         /// <summary>
         /// Prepare the given string for usage.
         /// The final string is returned in Item 1.
@@ -44,10 +47,10 @@ namespace AutoImportServiceCore.Core.Helpers
                     var lastKeyIndex = key.LastIndexOf('.');
                     var keyToArray = GetKeyToArray(remainingKey, key);
 
-                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), 0, usingResultSet);
+                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), emptyRows, usingResultSet);
                     for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
-                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), i, (JObject)usingResultSetArray[i], htmlEncode));
+                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), new List<int>() {i}, (JObject)usingResultSetArray[i], htmlEncode));
                     }
 
                     if (insertValues)
@@ -64,7 +67,7 @@ namespace AutoImportServiceCore.Core.Helpers
                 else if (key.Contains("<>"))
                 {
                     key = key.Replace("<>", "");
-                    var value = GetValue(key, 0, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, 0, usingResultSet), htmlEncode);
+                    var value = GetValue(key, emptyRows, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, emptyRows, usingResultSet), htmlEncode);
                     if (insertValues)
                     {
                         result = result.Replace($"[{{{key}<>}}]", value);
@@ -120,19 +123,19 @@ namespace AutoImportServiceCore.Core.Helpers
         /// Replaces the parameters in the given string with the corresponding values of the requested row.
         /// </summary>
         /// <param name="originalString">The string that needs replacements.</param>
-        /// <param name="row">The row to use the values from.</param>
+        /// <param name="rows">The rows to use the values from.</param>
         /// <param name="parameterKeys">The keys of the parameters to replace.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string ReplaceText(string originalString, int row, List<string> parameterKeys, JObject usingResultSet, bool htmlEncode = false)
+        public static string ReplaceText(string originalString, List<int> rows, List<string> parameterKeys, JObject usingResultSet, bool htmlEncode = false)
         {
             var result = originalString;
             
             foreach (var key in parameterKeys)
             {
                 var parameterName = DatabaseHelpers.CreateValidParameterName(key);
-                result = result.Replace($"?{parameterName}", GetValue(key, row, usingResultSet, htmlEncode));
+                result = result.Replace($"?{parameterName}", GetValue(key, rows, usingResultSet, htmlEncode));
             }
 
             return result;
@@ -142,13 +145,13 @@ namespace AutoImportServiceCore.Core.Helpers
         /// 
         /// </summary>
         /// <param name="key">The key to get the value from.</param>
-        /// <param name="row">The row to get the value from.</param>
+        /// <param name="rows">The rows to get the value from.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="htmlEncode">If the value from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string GetValue(string key, int row, JObject usingResultSet, bool htmlEncode)
+        public static string GetValue(string key, List<int> rows, JObject usingResultSet, bool htmlEncode)
         {
-            var value = (string)ResultSetHelper.GetCorrectObject<JValue>(key, row, usingResultSet);
+            var value = (string)ResultSetHelper.GetCorrectObject<JValue>(key, rows, usingResultSet);
 
             if (htmlEncode)
             {
