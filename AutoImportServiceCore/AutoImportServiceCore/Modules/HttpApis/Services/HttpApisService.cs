@@ -132,8 +132,8 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 else
                 {
                     var keyParts = header.UseResultSet.Split('.');
-                    var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
-                    var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
+                    var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : header.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+                    var remainingKey = keyParts.Length > 1 ? header.UseResultSet.Substring(keyParts[0].Length + 1) : "";
                     var tuple = ReplacementHelper.PrepareText(header.Value, usingResultSet, remainingKey);
                     var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet) : tuple.Item1;
                     request.Headers.Add(header.Name, headerValue);
