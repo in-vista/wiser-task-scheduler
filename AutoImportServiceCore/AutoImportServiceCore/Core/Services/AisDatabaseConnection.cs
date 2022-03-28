@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json.Linq;
@@ -26,7 +27,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <param name="connectionString">The connection string to use.</param>
         /// <param name="query">The query to execute.</param>
         /// <returns></returns>
-        public async Task<JObject> ExecuteQuery(string connectionString, string query)
+        public async Task<JObject> ExecuteQuery(string connectionString, string query, List<KeyValuePair<string, string>> parameters = null)
         {
             var resultSet = new JObject();
 
@@ -37,6 +38,14 @@ namespace AutoImportServiceCore.Core.Services
 
                 await using var command = connection.CreateCommand();
                 command.CommandText = query;
+
+                if (parameters != null)
+                {
+                    foreach (var parameter in parameters)
+                    {
+                        command.Parameters.AddWithValue(parameter.Key, parameter.Value);
+                    }
+                }
 
                 await using (var reader = await command.ExecuteReaderAsync())
                 {

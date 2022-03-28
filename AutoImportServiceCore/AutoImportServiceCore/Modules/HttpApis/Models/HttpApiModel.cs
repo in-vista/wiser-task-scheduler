@@ -30,6 +30,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         public bool SingleRequest { get; set; } = true;
 
         /// <summary>
+        /// Gets or sets the property of a response from which the next URL is taken.
+        /// </summary>
+        public string NextUrlProperty { get; set; }
+
+        /// <summary>
         /// Gets or sets additional headers to add before sending the request.
         /// </summary>
         [XmlArray("Headers")]
