@@ -151,8 +151,6 @@ namespace AutoImportServiceCore.Core.Services
                     resultSets.Add(action.Value.ResultSetName, resultSet);
                 }
             }
-
-            resultSets = null;
         }
 
         /// <summary>

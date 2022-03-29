@@ -16,6 +16,11 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <returns></returns>
         public static T GetCorrectObject<T>(string key, List<int> rows, JObject usingResultSet) where T : JToken
         {
+            if (key == "")
+            {
+                return usingResultSet as T;
+            }
+
             var keyParts = key.Split(".");
 
             // No next step left, return object as requested type.
