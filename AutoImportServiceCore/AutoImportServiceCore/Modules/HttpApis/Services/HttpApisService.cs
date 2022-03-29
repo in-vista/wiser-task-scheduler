@@ -184,7 +184,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             }
 
             using var client = new HttpClient();
-            var response = await client.SendAsync(request);
+            using var response = await client.SendAsync(request);
 
             var resultSet = new JObject
             {
