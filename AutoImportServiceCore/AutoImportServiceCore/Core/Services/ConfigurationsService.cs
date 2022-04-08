@@ -73,7 +73,8 @@ namespace AutoImportServiceCore.Core.Services
             var actionSets = new List<ActionModel[]>
             {
                 configuration.Queries,
-                configuration.HttpApis
+                configuration.HttpApis,
+                configuration.GenerateFileModels
             };
 
             var allActions = new List<ActionModel>();

@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Modules.Body.Interfaces;
 using AutoImportServiceCore.Modules.Body.Models;
@@ -11,6 +9,9 @@ using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Modules.Body.Services
 {
+    /// <summary>
+    /// A service to prepare bodies.
+    /// </summary>
     public class BodyService : IBodyService, IScopedService
     {
         /// <inheritdoc />

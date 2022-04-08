@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
+using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
@@ -54,5 +55,12 @@ namespace AutoImportServiceCore.Core.Models
         [XmlArray("HttpApis")]
         [XmlArrayItem(typeof(HttpApiModel))]
         public HttpApiModel[] HttpApis { get; set; }
+
+        /// <summary>
+        /// Gets or sets the generate files.
+        /// </summary>
+        [XmlArray("GenerateFiles")]
+        [XmlArrayItem(typeof(GenerateFileModel))]
+        public GenerateFileModel[] GenerateFileModels { get; set; }
     }
 }

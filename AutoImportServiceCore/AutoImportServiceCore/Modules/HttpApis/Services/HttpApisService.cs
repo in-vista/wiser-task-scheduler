@@ -30,6 +30,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <summary>
         /// Creates a new instance of <see cref="HttpApisService"/>.
         /// </summary>
+        /// <param name="bodyService"></param>
         /// <param name="logger"></param>
         public HttpApisService(IBodyService bodyService, ILogger<HttpApisService> logger)
         {
@@ -149,7 +150,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets);
 
                 LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}");
-                request.Content = new StringContent(body.ToString())
+                request.Content = new StringContent(body)
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
                 };
