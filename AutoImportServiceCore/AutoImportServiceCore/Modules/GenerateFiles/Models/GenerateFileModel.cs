@@ -18,6 +18,11 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Models
         public string FileName { get; set; }
 
         /// <summary>
+        /// Gets or sets if a single file needs to be generated.
+        /// </summary>
+        public bool SingleFile { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets the body to save in the file.
         /// </summary>
         public BodyModel Body { get; set; }

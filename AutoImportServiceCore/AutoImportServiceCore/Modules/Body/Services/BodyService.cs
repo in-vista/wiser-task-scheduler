@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Modules.Body.Interfaces;
@@ -15,7 +16,7 @@ namespace AutoImportServiceCore.Modules.Body.Services
     public class BodyService : IBodyService, IScopedService
     {
         /// <inheritdoc />
-        public string GenerateBody(BodyModel bodyModel, List<int> rows, JObject resultSets)
+        public string GenerateBody(BodyModel bodyModel, List<int> rows, JObject resultSets, int forcedIndex = -1)
         {
             var finalBody = new StringBuilder();
 
@@ -42,7 +43,7 @@ namespace AutoImportServiceCore.Modules.Body.Services
                         // Replace and combine body with values for each row.
                         else
                         {
-                            body = GenerateBodyCollection(body, bodyModel.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, rows, resultSets));
+                            body = GenerateBodyCollection(body, bodyModel.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, rows, resultSets), bodyPart.ForceIndex ? forcedIndex : -1);
                         }
                     }
                 }
@@ -60,8 +61,9 @@ namespace AutoImportServiceCore.Modules.Body.Services
         /// <param name="contentType">The content type that is being send in the request.</param>
         /// <param name="parameterKeys">The keys of the parameters that need to be replaced.</param>
         /// <param name="usingResultSet">The result set to get the values from.</param>
+        /// <param name="forcedIndex">The index a body part uses if it is set to use the forced index.</param>
         /// <returns></returns>
-        private string GenerateBodyCollection(string body, string contentType, List<string> parameterKeys, JArray usingResultSet)
+        private string GenerateBodyCollection(string body, string contentType, List<string> parameterKeys, JArray usingResultSet, int forcedIndex)
         {
             var separator = String.Empty;
 
@@ -75,11 +77,32 @@ namespace AutoImportServiceCore.Modules.Body.Services
 
             var bodyCollection = new StringBuilder();
 
+            var rows = new List<int> { 0, 0 };
+            var keyWithSecondLayer = parameterKeys.FirstOrDefault(key => key.Contains("[j]"));
+
+            var startIndex = forcedIndex >= 0 ? forcedIndex : 0;
+            var endIndex = forcedIndex >= 0 ? forcedIndex + 1 : usingResultSet.Count;
+
             // Perform the query for each row in the result set that is being used.
-            for (var i = 0; i < usingResultSet.Count; i++)
+            for (var i = startIndex; i < endIndex; i++)
             {
-                var bodyWithValues = ReplacementHelper.ReplaceText(body, new List<int>() { i }, parameterKeys, (JObject)usingResultSet[i]);
-                bodyCollection.Append($"{(i > 0 ? separator : "")}{bodyWithValues}");
+                rows[0] = i;
+
+                if (keyWithSecondLayer == null)
+                {
+                    var bodyWithValues = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject) usingResultSet[i]);
+                    bodyCollection.Append($"{(i > 0 ? separator : "")}{bodyWithValues}");
+                    continue;
+                }
+
+                var secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{keyWithSecondLayer.Substring(0, keyWithSecondLayer.IndexOf("[j]"))}", rows, (JObject) usingResultSet[i]);
+
+                for (var j = 0; j < secondLayerArray.Count; j++)
+                {
+                    rows[1] = j;
+                    var bodyWithValues = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject)usingResultSet[i]);
+                    bodyCollection.Append($"{(i > 0 ? separator : "")}{bodyWithValues}");
+                }
             }
 
             // Add collection syntax based on content type.

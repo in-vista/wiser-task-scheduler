@@ -24,5 +24,10 @@ namespace AutoImportServiceCore.Modules.Body.Models
         /// Gets or sets the result set to use for this specific part.
         /// </summary>
         public string UseResultSet { get; set; }
+
+        /// <summary>
+        /// Gets or sets if the body part needs to use the forced index.
+        /// </summary>
+        public bool ForceIndex { get; set; }
     }
 }

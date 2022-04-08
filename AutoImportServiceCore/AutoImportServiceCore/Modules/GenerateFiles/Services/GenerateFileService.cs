@@ -41,27 +41,45 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
         public async Task<JObject> Execute(ActionModel action, JObject resultSets)
         {
             var generateFile = (GenerateFileModel) action;
-            return await GenerateFile(generateFile, ReplacementHelper.EmptyRows, resultSets);
+
+            if (generateFile.SingleFile)
+            {
+                return await GenerateFile(generateFile, ReplacementHelper.EmptyRows, resultSets, generateFile.UseResultSet);
+            }
+
+            var rows = ResultSetHelper.GetCorrectObject<JArray>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+            var jArray = new JArray();
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var indexRows = new List<int> { i };
+                jArray.Add(await GenerateFile(generateFile, indexRows, resultSets, $"{generateFile.UseResultSet}[{i}]", i));
+            }
+
+            return new JObject
+            {
+                {"Results", jArray}
+            };
         }
 
         /// <summary>
         /// Generate a file.
         /// </summary>
-        /// <param name="generateFile">THe information for the file to be generated.</param>
+        /// <param name="generateFile">The information for the file to be generated.</param>
         /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <returns></returns>
-        private async Task<JObject> GenerateFile(GenerateFileModel generateFile, List<int> rows, JObject resultSets)
+        private async Task<JObject> GenerateFile(GenerateFileModel generateFile, List<int> rows, JObject resultSets, string useResultSet, int forcedIndex = -1)
         {
             var fileLocation = generateFile.FileLocation;
             var fileName = generateFile.FileName;
 
             // Replace the file location and name if a result set is used.
-            if (!String.IsNullOrWhiteSpace(generateFile.UseResultSet))
+            if (!String.IsNullOrWhiteSpace(useResultSet))
             {
-                var keyParts = generateFile.UseResultSet.Split('.');
-                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
-                var remainingKey = keyParts.Length > 1 ? generateFile.UseResultSet.Substring(keyParts[0].Length + 1) : "";
+                var keyParts = useResultSet.Split('.');
+                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
+                var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
                 var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey);
                 var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey);
@@ -72,7 +90,7 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
 
             LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.");
 
-            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets);
+            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, forcedIndex);
 
             var fileGenerated = false;
             try
