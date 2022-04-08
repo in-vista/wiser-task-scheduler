@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Body.Models;
 
 namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
