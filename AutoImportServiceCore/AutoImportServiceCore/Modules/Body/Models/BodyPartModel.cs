@@ -1,10 +1,10 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 
-namespace AutoImportServiceCore.Modules.HttpApis.Models
+namespace AutoImportServiceCore.Modules.Body.Models
 {
     /// <summary>
-    /// A model for a part of the body of a HTTP API call.
+    /// A model for a part of the body.
     /// </summary>
     [XmlType("BodyPart")]
     public class BodyPartModel
@@ -24,5 +24,10 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// Gets or sets the result set to use for this specific part.
         /// </summary>
         public string UseResultSet { get; set; }
+
+        /// <summary>
+        /// Gets or sets if the body part needs to use the forced index.
+        /// </summary>
+        public bool ForceIndex { get; set; }
     }
 }

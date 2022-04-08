@@ -1,16 +1,16 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 
-namespace AutoImportServiceCore.Modules.HttpApis.Models
+namespace AutoImportServiceCore.Modules.Body.Models
 {
     /// <summary>
-    /// A model to add a body to a HTTP API call.
+    /// A model to add a body.
     /// </summary>
     [XmlType("Body")]
     public class BodyModel
     {
         /// <summary>
-        /// Gets or sets the type of the content that will be send to the API.
+        /// Gets or sets the type of the content of the body.
         /// </summary>
         [Required]
         public string ContentType { get; set; }
