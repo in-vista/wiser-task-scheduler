@@ -46,7 +46,7 @@ namespace AutoImportServiceCore
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
                     ConfigureAisServices(services);
-
+                    
                     Log.Logger = new LoggerConfiguration()
                         .ReadFrom.Configuration(hostContext.Configuration)
                         .CreateLogger();
@@ -61,6 +61,7 @@ namespace AutoImportServiceCore
         private static void ConfigureHostedServices(IServiceCollection services)
         {
             services.AddHostedService<MainWorker>();
+            services.AddHostedService<CleanupWorker>();
         }
 
         private static void ConfigureAisServices(IServiceCollection services)
