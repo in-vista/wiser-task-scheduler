@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models.OAuth;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -12,14 +13,14 @@ namespace AutoImportServiceCore.Core.Services
     public class OAuthService : IOAuthService, ISingletonService
     {
         private readonly ILogger<OAuthService> logger;
-        private readonly AisDatabaseConnection databaseConnection;
+        private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
 
-        public OAuthService(ILogger<OAuthService> logger, AisDatabaseConnection databaseConnection)
+        public OAuthService(ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
             this.logger = logger;
-            this.databaseConnection = databaseConnection;
+            this.serviceProvider = serviceProvider;
         }
 
         /// <inheritdoc />
@@ -27,8 +28,11 @@ namespace AutoImportServiceCore.Core.Services
         {
             this.configuration = configuration;
 
+            using var scope = serviceProvider.CreateScope();
+            var databaseConnection = scope.ServiceProvider.GetRequiredService<AisDatabaseConnection>();
+
             var query = @"SELECT accessToken.`value` AS accessToken, tokenType.`value` AS tokenType, refreshToken.`value` AS refreshToken, expireTime.`value` AS expireTime
-FROM (SELECT 1) AS temp
+FROM DUAL AS temp
 LEFT JOIN easy_objects AS accessToken ON accessToken.`key` = ?accessToken
 LEFT JOIN easy_objects AS tokenType ON tokenType.`key` = ?tokenType
 LEFT JOIN easy_objects AS refreshToken ON refreshToken.`key` = ?refreshToken
