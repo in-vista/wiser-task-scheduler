@@ -10,6 +10,7 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Core.Models.OAuth;
 using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
@@ -27,8 +28,10 @@ namespace AutoImportServiceCore.Core.Services
     public class MainService : IMainService, ISingletonService
     {
         private readonly string localConfiguration;
+        private readonly string localOAuthConfiguration;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
+        private readonly IOAuthService oAuthService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
@@ -39,11 +42,13 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
+            localOAuthConfiguration = aisSettings.Value.MainService.LocalOAuthConfiguration;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
+            this.oAuthService = oAuthService;
             this.logger = logger;
 
             activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
@@ -52,6 +57,8 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task ManageConfigurations()
         {
+            await SetOAuthConfiguration();
+
             var configurations = await GetConfigurations();
 
             if (configurations == null)
@@ -91,6 +98,15 @@ namespace AutoImportServiceCore.Core.Services
             }
             
             await StopRemovedConfigurations(configurations);
+        }
+
+        private async Task SetOAuthConfiguration()
+        {
+            var serializer = new XmlSerializer(typeof(ConfigurationModel));
+            using var reader = new StringReader(await File.ReadAllTextAsync(localOAuthConfiguration));
+            var configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+
+            await oAuthService.SetConfigurationAsync(configuration);
         }
 
         private async Task StopRemovedConfigurations(List<ConfigurationModel> configurations)
