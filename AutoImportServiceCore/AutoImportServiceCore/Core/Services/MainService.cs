@@ -102,7 +102,7 @@ namespace AutoImportServiceCore.Core.Services
 
         private async Task SetOAuthConfiguration()
         {
-            var serializer = new XmlSerializer(typeof(ConfigurationModel));
+            var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
             using var reader = new StringReader(await File.ReadAllTextAsync(localOAuthConfiguration));
             var configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
 

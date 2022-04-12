@@ -12,6 +12,8 @@ namespace AutoImportServiceCore.Core.Services
 {
     public class OAuthService : IOAuthService, ISingletonService
     {
+        private const string TableName = "easy_objects";
+
         private readonly ILogger<OAuthService> logger;
         private readonly IServiceProvider serviceProvider;
 
@@ -31,12 +33,12 @@ namespace AutoImportServiceCore.Core.Services
             using var scope = serviceProvider.CreateScope();
             var databaseConnection = scope.ServiceProvider.GetRequiredService<AisDatabaseConnection>();
 
-            var query = @"SELECT accessToken.`value` AS accessToken, tokenType.`value` AS tokenType, refreshToken.`value` AS refreshToken, expireTime.`value` AS expireTime
-FROM DUAL AS temp
-LEFT JOIN easy_objects AS accessToken ON accessToken.`key` = ?accessToken
-LEFT JOIN easy_objects AS tokenType ON tokenType.`key` = ?tokenType
-LEFT JOIN easy_objects AS refreshToken ON refreshToken.`key` = ?refreshToken
-LEFT JOIN easy_objects AS expireTime ON expireTime.`key` = ?expireTime";
+            var query = @$"SELECT accessToken.`value` AS accessToken, tokenType.`value` AS tokenType, refreshToken.`value` AS refreshToken, expireTime.`value` AS expireTime
+FROM (SELECT 1) AS temp
+LEFT JOIN {TableName} AS accessToken ON accessToken.`key` = ?accessToken
+LEFT JOIN {TableName} AS tokenType ON tokenType.`key` = ?tokenType
+LEFT JOIN {TableName} AS refreshToken ON refreshToken.`key` = ?refreshToken
+LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
 
             // Check if there is already information stored in the database to use.
             foreach (var oAuth in this.configuration.OAuths)
