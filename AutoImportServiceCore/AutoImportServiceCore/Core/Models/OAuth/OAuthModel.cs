@@ -1,4 +1,6 @@
 ﻿using System;
+using System.ComponentModel;
+using System.Xml;
 using System.Xml.Serialization;
 
 namespace AutoImportServiceCore.Core.Models.OAuth
@@ -25,6 +27,24 @@ namespace AutoImportServiceCore.Core.Models.OAuth
         /// Gets or sets the password to login with when no access token or refresh token is available.
         /// </summary>
         public string Password { get; set; }
+
+        /// <summary>
+        /// Gets or sets the offset from the expire time.
+        /// </summary>
+        [XmlIgnore]
+        public TimeSpan ExpireTimeOffset { get; set; } = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// Gets or sets <see cref="ExpireTimeOffset"/> from a XML file.
+        /// </summary>
+        [Browsable(false)]
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        [XmlElement("ExpireTimeOffset")]
+        public string DelayString
+        {
+            get => XmlConvert.ToString(ExpireTimeOffset);
+            set => ExpireTimeOffset = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);
+        }
 
         /// <summary>
         /// Gets or sets the log settings.

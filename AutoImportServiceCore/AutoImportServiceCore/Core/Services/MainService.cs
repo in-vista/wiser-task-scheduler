@@ -36,6 +36,8 @@ namespace AutoImportServiceCore.Core.Services
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
+        private long oAuthConfigurationVersion;
+
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
@@ -57,8 +59,6 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task ManageConfigurations()
         {
-            await SetOAuthConfiguration();
-
             var configurations = await GetConfigurations();
 
             if (configurations == null)
@@ -100,11 +100,13 @@ namespace AutoImportServiceCore.Core.Services
             await StopRemovedConfigurations(configurations);
         }
 
-        private async Task SetOAuthConfiguration()
+        private async Task SetOAuthConfiguration(string oAuthConfiguration)
         {
             var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
-            using var reader = new StringReader(await File.ReadAllTextAsync(localOAuthConfiguration));
+            using var reader = new StringReader(oAuthConfiguration);
             var configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+
+            configuration.LogSettings ??= LogSettings;
 
             await oAuthService.SetConfigurationAsync(configuration);
         }
@@ -199,6 +201,16 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
                     configurations.Add(configuration);
+                }
+            }
+
+            if (!String.IsNullOrWhiteSpace(localOAuthConfiguration))
+            {
+                var fileVersion = File.GetLastWriteTimeUtc(localOAuthConfiguration).Ticks;
+                if (fileVersion != oAuthConfigurationVersion)
+                {
+                    await SetOAuthConfiguration(await File.ReadAllTextAsync(localOAuthConfiguration));
+                    oAuthConfigurationVersion = fileVersion;
                 }
             }
 

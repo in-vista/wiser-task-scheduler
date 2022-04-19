@@ -25,6 +25,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         public string Method { get; set; }
 
         /// <summary>
+        /// Gets or sets the OAuth service to get the access token from.
+        /// </summary>
+        public string OAuth { get; set; }
+
+        /// <summary>
         /// Gets or sets if the HTTP API request needs to be requested once or more.
         /// If false the using result set needs to be set to an array.
         /// </summary>

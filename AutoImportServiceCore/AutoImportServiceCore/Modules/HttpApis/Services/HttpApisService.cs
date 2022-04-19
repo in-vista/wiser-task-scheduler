@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 using AutoImportServiceCore.Core.Enums;
@@ -24,18 +24,25 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
     /// </summary>
     public class HttpApisService : IHttpApisService, IActionsService, IScopedService
     {
+        private readonly IOAuthService oAuthService;
         private readonly IBodyService bodyService;
         private readonly ILogger<HttpApisService> logger;
+
+        private bool retryOAuthUnauthorizedResponse;
 
         /// <summary>
         /// Creates a new instance of <see cref="HttpApisService"/>.
         /// </summary>
+        /// <param name="oAuthService"></param>
         /// <param name="bodyService"></param>
         /// <param name="logger"></param>
-        public HttpApisService(IBodyService bodyService, ILogger<HttpApisService> logger)
+        public HttpApisService(IOAuthService oAuthService, IBodyService bodyService, ILogger<HttpApisService> logger)
         {
+            this.oAuthService = oAuthService;
             this.bodyService = bodyService;
             this.logger = logger;
+
+            retryOAuthUnauthorizedResponse = true;
         }
 
         /// <inheritdoc />
@@ -143,6 +150,16 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     request.Headers.Add(header.Name, headerValue);
                 }
             }
+
+            if (!String.IsNullOrWhiteSpace(httpApi.OAuth))
+            {
+                var token = await oAuthService.GetAccessTokenAsync(httpApi.OAuth);
+                if (token != null)
+                {
+                    request.Headers.Add("Authorization", token);
+                }
+            }
+
             LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}");
             
             if (httpApi.Body != null)
@@ -159,6 +176,17 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             using var client = new HttpClient();
             using var response = await client.SendAsync(request);
 
+            // If the request was unauthorized retry the request if it has an OAuth API name set and it hasn't retried before.
+            if (response.StatusCode == HttpStatusCode.Unauthorized && !String.IsNullOrWhiteSpace(httpApi.OAuth) && retryOAuthUnauthorizedResponse)
+            {
+                retryOAuthUnauthorizedResponse = false;
+                await oAuthService.RequestWasUnauthorizedAsync(httpApi.OAuth);
+
+                return await ExecuteRequest(httpApi, resultSets, useResultSet, rows, overrideUrl);
+            }
+
+            retryOAuthUnauthorizedResponse = true;
+
             var resultSet = new JObject
             {
                 { "StatusCode", ((int)response.StatusCode).ToString() }
@@ -172,7 +200,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             var responseBody = await response.Content.ReadAsStringAsync();
             if (resultSet.ContainsKey("Content-Type") && ((string)resultSet["Content-Type"][0]).Contains("json"))
             {
-                resultSet.Add("Body", JObject.Parse(responseBody));
+                if (responseBody.StartsWith("{"))
+                {
+                    resultSet.Add("Body", JObject.Parse(responseBody));
+                }
+                else if(responseBody.StartsWith("["))
+                {
+                    resultSet.Add("Body", JArray.Parse(responseBody));
+                }
             }
             else if (resultSet.ContainsKey("Content-Type") && ((string)resultSet["Content-Type"][0]).Contains("xml"))
             {
