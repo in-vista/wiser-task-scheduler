@@ -184,6 +184,20 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     if(String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
 
+                    if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
+                    {
+                        if (String.IsNullOrWhiteSpace(localOAuthConfiguration))
+                        {
+                            if (wiserConfiguration.Version != oAuthConfigurationVersion)
+                            {
+                                await SetOAuthConfiguration(wiserConfiguration.EditorValue);
+                                oAuthConfigurationVersion = wiserConfiguration.Version;
+                            }
+                        }
+
+                        continue;
+                    }
+
                     var configuration = DeserializeConfiguration(wiserConfiguration.EditorValue, wiserConfiguration.Name);
 
                     if (configuration != null)
