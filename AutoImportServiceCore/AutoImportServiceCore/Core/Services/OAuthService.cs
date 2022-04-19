@@ -95,12 +95,16 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     // Setup correct authentication.
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
+                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.");
+
                         formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
                         formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
                         formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
                     }
                     else
                     {
+                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.");
+
                         formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
                         formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
                     }

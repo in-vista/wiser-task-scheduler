@@ -182,6 +182,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 retryOAuthUnauthorizedResponse = false;
                 await oAuthService.RequestWasUnauthorizedAsync(httpApi.OAuth);
 
+                LogHelper.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"Request to {url} return \"Unauthorized\" on OAuth token. Retrying once with new OAuth token.");
                 return await ExecuteRequest(httpApi, resultSets, useResultSet, rows, overrideUrl);
             }
 
