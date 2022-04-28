@@ -9,8 +9,11 @@ using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models.OAuth;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 
 namespace AutoImportServiceCore.Core.Services
@@ -19,13 +22,15 @@ namespace AutoImportServiceCore.Core.Services
     {
         private const string TableName = "easy_objects";
 
+        private readonly GclSettings gclSettings;
         private readonly ILogger<OAuthService> logger;
         private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
 
-        public OAuthService(ILogger<OAuthService> logger, IServiceProvider serviceProvider)
+        public OAuthService(IOptions<GclSettings> gclSettings, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
+            this.gclSettings = gclSettings.Value;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
         }
@@ -55,12 +60,13 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     new("refreshToken", $"AIS_{oAuth.ApiName}_RefreshToken"),
                     new("expireTime", $"AIS_{oAuth.ApiName}_ExpireTime")
                 };
-
+                
                 JObject result = await databaseConnection.ExecuteQuery(this.configuration.ConnectionString, query, parameters);
-                oAuth.AccessToken = (string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].accessToken", ReplacementHelper.EmptyRows, result);
+                oAuth.AccessToken = ((string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].accessToken", ReplacementHelper.EmptyRows, result))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
                 oAuth.TokenType = (string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].tokenType", ReplacementHelper.EmptyRows, result);
-                oAuth.RefreshToken = (string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].refreshToken", ReplacementHelper.EmptyRows, result);
-                oAuth.ExpireTime = Convert.ToDateTime((string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].expireTime", ReplacementHelper.EmptyRows, result));
+                oAuth.RefreshToken = ((string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].refreshToken", ReplacementHelper.EmptyRows, result))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                var expireTime = (string) ResultSetHelper.GetCorrectObject<JValue>("Results[0].expireTime", ReplacementHelper.EmptyRows, result);
+                oAuth.ExpireTime = String.IsNullOrWhiteSpace(expireTime) ? DateTime.MinValue : Convert.ToDateTime(expireTime);
 
                 oAuth.LogSettings ??= configuration.LogSettings;
             }
@@ -206,11 +212,11 @@ ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)";
             var parameters = new List<KeyValuePair<string, string>>
             {
                 new("accessTokenKey", $"AIS_{oAuthApi.ApiName}_AccessToken"),
-                new("accessTokenValue", oAuthApi.AccessToken),
+                new("accessTokenValue", oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey)),
                 new("tokenTypeKey", $"AIS_{oAuthApi.ApiName}_TokenType"),
                 new("tokenTypeValue", oAuthApi.TokenType),
                 new("refreshTokenKey", $"AIS_{oAuthApi.ApiName}_RefreshToken"),
-                new("refreshTokenValue", oAuthApi.RefreshToken),
+                new("refreshTokenValue", oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey)),
                 new("expireTimeKey", $"AIS_{oAuthApi.ApiName}_ExpireTime"),
                 new("expireTimeValue", oAuthApi.ExpireTime.ToString())
             };

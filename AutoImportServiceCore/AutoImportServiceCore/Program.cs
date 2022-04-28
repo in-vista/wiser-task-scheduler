@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Serilog;
@@ -55,6 +56,7 @@ namespace AutoImportServiceCore
 
         private static void ConfigureSettings(IConfiguration configuration, IServiceCollection services)
         {
+            services.Configure<GclSettings>(configuration.GetSection("Gcl"));
             services.Configure<AisSettings>(configuration.GetSection("Ais"));
         }
 
