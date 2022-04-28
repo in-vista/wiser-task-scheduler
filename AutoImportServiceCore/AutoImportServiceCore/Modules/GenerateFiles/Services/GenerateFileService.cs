@@ -95,7 +95,8 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
             var fileGenerated = false;
             try
             {
-                await File.WriteAllTextAsync($"{fileLocation}{(fileLocation.EndsWith('/') || fileLocation.EndsWith('\\') ? "" : "/")}{fileName}", body);
+                Directory.CreateDirectory(fileLocation);
+                await File.WriteAllTextAsync(Path.Combine(fileLocation, fileName), body);
                 fileGenerated = true;
                 LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"File '{fileName}' generated at '{fileLocation}'.");
             }
