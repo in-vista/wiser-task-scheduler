@@ -73,9 +73,8 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
         }
 
         /// <inheritdoc />
-        public async Task<string> GetAccessTokenAsync(string apiName)
+        public async Task<string> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken = true)
         {
-
             var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => oAuth.ApiName.Equals(apiName));
 
             if (oAuthApi == null)
@@ -84,25 +83,24 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
             }
 
             // Check if a new access token needs to be requested and request it.
-            // True: New access token requested and need to be stored.
-            // False: Current access token should be valid.
-            // Null: Failed to retrieve access token.
             var result = await Task.Run(() =>
             {
                 lock (oAuthApi)
                 {
                     if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
                     {
-                        return false;
+                        return OAuthState.CurrentToken;
                     }
 
                     var formData = new List<KeyValuePair<string, string>>();
 
                     // Setup correct authentication.
+                    OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
                         LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.");
 
+                        failState = OAuthState.FailedLogin;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
                         formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
                         formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
@@ -111,6 +109,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     {
                         LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.");
 
+                        failState = OAuthState.FailedRefreshToken;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
                         formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
                     }
@@ -138,7 +137,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     if (!response.IsSuccessStatusCode)
                     {
                         LogHelper.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}");
-                        return (bool?)null;
+                        return failState;
                     }
 
                     var body = JObject.Parse(json);
@@ -160,16 +159,28 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
 
                     LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}");
 
-                    return true;
+                    return OAuthState.NewToken;
                 }
             });
 
-            if (result == null)
+            if (result == OAuthState.FailedLogin)
             {
                 return null;
             }
 
-            if (!result.Value)
+            if (result == OAuthState.FailedRefreshToken)
+            {
+                if (!retryAfterWrongRefreshToken)
+                {
+                    return null;
+                }
+
+                //Retry to get the token with the login credentials if the refresh token was invalid.
+                await RequestWasUnauthorizedAsync(apiName);
+                return await GetAccessTokenAsync(apiName, false);
+            }
+
+            if (result == OAuthState.CurrentToken)
             {
                 return $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
             }
