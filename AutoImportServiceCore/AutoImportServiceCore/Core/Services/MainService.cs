@@ -10,6 +10,7 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Core.Models.OAuth;
 using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
@@ -27,11 +28,15 @@ namespace AutoImportServiceCore.Core.Services
     public class MainService : IMainService, ISingletonService
     {
         private readonly string localConfiguration;
+        private readonly string localOAuthConfiguration;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
+        private readonly IOAuthService oAuthService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
+
+        private long oAuthConfigurationVersion;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -39,11 +44,13 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
+            localOAuthConfiguration = aisSettings.Value.MainService.LocalOAuthConfiguration;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
+            this.oAuthService = oAuthService;
             this.logger = logger;
 
             activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
@@ -91,6 +98,17 @@ namespace AutoImportServiceCore.Core.Services
             }
             
             await StopRemovedConfigurations(configurations);
+        }
+
+        private async Task SetOAuthConfiguration(string oAuthConfiguration)
+        {
+            var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
+            using var reader = new StringReader(oAuthConfiguration);
+            var configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+
+            configuration.LogSettings ??= LogSettings;
+
+            await oAuthService.SetConfigurationAsync(configuration);
         }
 
         private async Task StopRemovedConfigurations(List<ConfigurationModel> configurations)
@@ -166,6 +184,20 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     if(String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
 
+                    if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
+                    {
+                        if (String.IsNullOrWhiteSpace(localOAuthConfiguration))
+                        {
+                            if (wiserConfiguration.Version != oAuthConfigurationVersion)
+                            {
+                                await SetOAuthConfiguration(wiserConfiguration.EditorValue);
+                                oAuthConfigurationVersion = wiserConfiguration.Version;
+                            }
+                        }
+
+                        continue;
+                    }
+
                     var configuration = DeserializeConfiguration(wiserConfiguration.EditorValue, wiserConfiguration.Name);
 
                     if (configuration != null)
@@ -183,6 +215,16 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
                     configurations.Add(configuration);
+                }
+            }
+
+            if (!String.IsNullOrWhiteSpace(localOAuthConfiguration))
+            {
+                var fileVersion = File.GetLastWriteTimeUtc(localOAuthConfiguration).Ticks;
+                if (fileVersion != oAuthConfigurationVersion)
+                {
+                    await SetOAuthConfiguration(await File.ReadAllTextAsync(localOAuthConfiguration));
+                    oAuthConfigurationVersion = fileVersion;
                 }
             }
 

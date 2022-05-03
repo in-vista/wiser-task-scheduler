@@ -12,6 +12,11 @@ namespace AutoImportServiceCore.Core.Models
         public string LocalConfiguration { get; set; }
 
         /// <summary>
+        /// Gets or sets a configuration that needs to be used for OAuth from the local disk instead of loading it from Wiser.
+        /// </summary>
+        public string LocalOAuthConfiguration { get; set; }
+
+        /// <summary>
         /// Gets or sets the run scheme for the <see cref="MainWorker"/>.
         /// </summary>
         [Required]
