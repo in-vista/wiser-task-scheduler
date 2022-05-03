@@ -46,23 +46,37 @@ namespace AutoImportServiceCore.Core.Services
 
             foreach (var folderPath in cleanupServiceSettings.FileFolderPaths)
             {
-                var files = Directory.GetFiles(folderPath);
-                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.");
-                var filesDeleted = 0;
-
-                foreach (var file in files)
+                try
                 {
-                    if (File.GetLastWriteTime(file) >= DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore))
+                    var files = Directory.GetFiles(folderPath);
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.");
+                    var filesDeleted = 0;
+
+                    foreach (var file in files)
                     {
-                        continue;
+                        try
+                        {
+                            if (File.GetLastWriteTime(file) >= DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore))
+                            {
+                                continue;
+                            }
+
+                            File.Delete(file);
+                            filesDeleted++;
+                            LogHelper.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}");
+                        }
+                        catch (Exception e)
+                        {
+                            LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Could not delete file: {file} due to exception {e}");
+                        }
                     }
 
-                    File.Delete(file);
-                    filesDeleted++;
-                    LogHelper.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}");
+                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.");
                 }
-
-                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.");
+                catch (Exception e)
+                {
+                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}");
+                }
             }
         }
     }
