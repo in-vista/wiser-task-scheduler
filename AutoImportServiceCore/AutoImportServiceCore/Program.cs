@@ -8,6 +8,8 @@ using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Services;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Serilog;
