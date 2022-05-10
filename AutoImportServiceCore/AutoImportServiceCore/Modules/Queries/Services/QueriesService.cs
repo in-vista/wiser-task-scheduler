@@ -60,7 +60,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
                 await logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}", configurationServiceName, query.TimeId, query.Order);
-                var dataTable = await databaseConnection.GetAsync(query.Query, cleanUp: true);// .ExecuteQuery(connectionString, query.Query);
+                var dataTable = await databaseConnection.GetAsync(query.Query, cleanUp: true);
                 return GetResultSetFromDataTable(dataTable);
             }
 
@@ -81,7 +81,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                     databaseConnection.AddParameter(parameter.Key, parameter.Value);
                 }
 
-                var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: true);// .ExecuteQuery(connectionString, queryString, insertedParameters);
+                var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: true);
                 return GetResultSetFromDataTable(dataTable);
             }
 
@@ -136,7 +136,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 databaseConnection.AddParameter(parameter.Key, parameter.Value);
             }
 
-            var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);// .ExecuteQuery(connectionString, queryString, parameters);
+            var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);
             return GetResultSetFromDataTable(dataTable);
         }
 

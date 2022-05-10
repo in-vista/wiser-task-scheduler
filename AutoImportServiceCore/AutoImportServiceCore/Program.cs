@@ -76,6 +76,7 @@ namespace AutoImportServiceCore
             services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
             services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
             services.AddScoped<IObjectsService, ObjectsService>();
+            services.AddScoped<IDatabaseHelpersService, MySqlDatabaseHelpersService>();
 
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
