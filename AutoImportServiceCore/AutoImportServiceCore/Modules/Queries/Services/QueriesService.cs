@@ -12,6 +12,7 @@ using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -24,7 +25,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
     {
         private readonly ILogService logService;
         private readonly ILogger<QueriesService> logger;
-        private readonly IDatabaseConnection databaseConnection;
+        private readonly IServiceProvider serviceProvider;
 
         private string connectionString;
 
@@ -34,11 +35,11 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
         /// <param name="databaseConnection"></param>
-        public QueriesService(ILogService logService, ILogger<QueriesService> logger, IDatabaseConnection databaseConnection)
+        public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider)
         {
             this.logService = logService;
             this.logger = logger;
-            this.databaseConnection = databaseConnection;
+            this.serviceProvider = serviceProvider;
         }
 
         /// <inheritdoc />
@@ -50,6 +51,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <inheritdoc />
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
+            using var scope = serviceProvider.CreateScope();
+            var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+
             var query = (QueryModel)action;
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
@@ -104,12 +108,12 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                     {
                         rows[1] = j;
                         var lastJQuery = j == secondLayerArray.Count - 1;
-                        jArray.Add(await ExecuteQueryWithParameters(queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery));
+                        jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery));
                     }
                 }
                 else
                 {
-                    jArray.Add(await ExecuteQueryWithParameters(queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery));
+                    jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery));
                 }
             }
 
@@ -119,7 +123,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             };
         }
 
-        private async Task<JObject> ExecuteQueryWithParameters(string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery)
+        private async Task<JObject> ExecuteQueryWithParameters(IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery)
         {
             var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
