@@ -5,6 +5,9 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -18,15 +21,17 @@ namespace AutoImportServiceCore.Core.Services
         private const string LogName = "CleanupService";
 
         private readonly CleanupServiceSettings cleanupServiceSettings;
+        private readonly IServiceProvider serviceProvider;
         private readonly ILogService logService;
         private readonly ILogger<CleanupService> logger;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
-        public CleanupService(IOptions<AisSettings> aisSettings, ILogService logService, ILogger<CleanupService> logger)
+        public CleanupService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupService> logger)
         {
             cleanupServiceSettings = aisSettings.Value.CleanupService;
+            this.serviceProvider = serviceProvider;
             this.logService = logService;
             this.logger = logger;
         }
@@ -34,13 +39,14 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task CleanupAsync()
         {
-            await CleanupFiles();
+            await CleanupFilesAsync();
+            await CleanupDatabaseLogsAsync();
         }
 
         /// <summary>
         /// Cleanup files older than the set number of days in the given folders.
         /// </summary>
-        private async Task CleanupFiles()
+        private async Task CleanupFilesAsync()
         {
             if (cleanupServiceSettings.FileFolderPaths == null || cleanupServiceSettings.FileFolderPaths.Length == 0)
             {
@@ -81,6 +87,20 @@ namespace AutoImportServiceCore.Core.Services
                     await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}", LogName);
                 }
             }
+        }
+
+        /// <summary>
+        /// Cleanup logs in the database older than the set number of days in the given folders.
+        /// </summary>
+        private async Task CleanupDatabaseLogsAsync()
+        {
+            using var scope = serviceProvider.CreateScope();
+            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
+            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.AisLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
+
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.AisLogs}'.", LogName);
         }
     }
 }
