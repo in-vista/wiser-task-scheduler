@@ -6,7 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
+using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using AutoImportServiceCore.Modules.Wiser.Models;
@@ -21,6 +21,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
     public class WiserService : IWiserService, ISingletonService
     {
         private readonly WiserSettings wiserSettings;
+        private readonly ILogService logService;
         private readonly ILogger<WiserService> logger;
         private readonly LogSettings logSettings;
 
@@ -32,9 +33,10 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
 
         public string AccesToken => GetAccessToken();
 
-        public WiserService(IOptions<AisSettings> aisSettings, ILogger<WiserService> logger)
+        public WiserService(IOptions<AisSettings> aisSettings, ILogService logService, ILogger<WiserService> logger)
         {
             wiserSettings = aisSettings.Value.Wiser;
+            this.logService = logService;
             this.logger = logger;
             logSettings = wiserSettings.LogSettings ?? new LogSettings();
 
@@ -49,13 +51,14 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <returns></returns>
         private string GetAccessToken()
         {
+            // Lock to prevent multiple requests at once.
             lock (accessToken)
             {
                 if (String.IsNullOrWhiteSpace(accessToken))
                 {
                     Login();
                 }
-                else if (accessTokenExpireTime < DateTime.Now)
+                else if (accessTokenExpireTime <= DateTime.Now)
                 {
                     if (String.IsNullOrWhiteSpace(refreshToken))
                     {
@@ -74,7 +77,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccesToken"/> or <see cref="GetAccessToken"/>.
+        /// This method is called when using <see cref="AccesToken"/> or <see cref="GetAccessToken"/> with a lock.
         /// </summary>
         private void Login(bool useRefreshToken = false)
         {
@@ -104,7 +107,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             };
             request.Headers.Add("Accept", "application/json");
             
-            LogHelper.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}");
+            logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}");
             
             using var client = new HttpClient();
             try
@@ -112,28 +115,29 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 var response = client.Send(request);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.");
+                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.");
                     return;
                 }
 
                 using var reader = new StreamReader(response.Content.ReadAsStream());
                 var body = reader.ReadToEnd();
-                LogHelper.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}");
+                logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}");
                 var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
                 accessToken = wiserLoginResponse.AccessToken;
-                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn);
+                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn).AddMinutes(-1); // Refresh 1 minute before expire.
                 refreshToken = wiserLoginResponse.RefreshToken;
             }
             catch (Exception e)
             {
-                LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}");
+                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}");
             }
         }
 
         /// <inheritdoc />
         public async Task<List<TemplateSettingsModel>> RequestConfigurations()
         {
+            // Lock cannot be used inside an async function. This way we can wait till the request has completed.
             return await Task.Run(() =>
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}");
@@ -146,7 +150,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
 
                     if (response.StatusCode != HttpStatusCode.OK)
                     {
-                        LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
+                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
                         return null;
                     }
 
@@ -158,10 +162,9 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 }
                 catch (Exception e)
                 {
-                    LogHelper.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}");
+                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}");
                     return null;
                 }
-                
             });
         }
 
