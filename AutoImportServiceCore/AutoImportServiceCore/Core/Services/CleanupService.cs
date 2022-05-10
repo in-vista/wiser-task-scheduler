@@ -2,7 +2,6 @@
 using System.IO;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -16,28 +15,32 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class CleanupService : ICleanupService, ISingletonService
     {
+        private const string LogName = "CleanupService";
+
         private readonly CleanupServiceSettings cleanupServiceSettings;
+        private readonly ILogService logService;
         private readonly ILogger<CleanupService> logger;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
-        public CleanupService(IOptions<AisSettings> aisSettings, ILogger<CleanupService> logger)
+        public CleanupService(IOptions<AisSettings> aisSettings, ILogService logService, ILogger<CleanupService> logger)
         {
             cleanupServiceSettings = aisSettings.Value.CleanupService;
+            this.logService = logService;
             this.logger = logger;
         }
 
         /// <inheritdoc />
         public async Task CleanupAsync()
         {
-            CleanupFiles();
+            await CleanupFiles();
         }
 
         /// <summary>
         /// Cleanup files older than the set number of days in the given folders.
         /// </summary>
-        private void CleanupFiles()
+        private async Task CleanupFiles()
         {
             if (cleanupServiceSettings.FileFolderPaths == null || cleanupServiceSettings.FileFolderPaths.Length == 0)
             {
@@ -49,7 +52,7 @@ namespace AutoImportServiceCore.Core.Services
                 try
                 {
                     var files = Directory.GetFiles(folderPath);
-                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.");
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.", LogName);
                     var filesDeleted = 0;
 
                     foreach (var file in files)
@@ -63,19 +66,19 @@ namespace AutoImportServiceCore.Core.Services
 
                             File.Delete(file);
                             filesDeleted++;
-                            LogHelper.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}");
+                            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}", LogName);
                         }
                         catch (Exception e)
                         {
-                            LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Could not delete file: {file} due to exception {e}");
+                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Could not delete file: {file} due to exception {e}", LogName);
                         }
                     }
 
-                    LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.");
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.", LogName);
                 }
                 catch (Exception e)
                 {
-                    LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}");
+                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}", LogName);
                 }
             }
         }

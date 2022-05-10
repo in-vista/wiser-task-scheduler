@@ -67,7 +67,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 var url = httpApi.Url;
                 do
                 {
-                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, url);
+                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, configurationServiceName, url);
                     url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                     jArray.Add(result);
                 } while (!String.IsNullOrWhiteSpace(url));
@@ -93,7 +93,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     var url = httpApi.Url;
                     do
                     {
-                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, url);
+                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url);
                         url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));

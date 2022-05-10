@@ -14,6 +14,8 @@ namespace AutoImportServiceCore.Core.Workers
     /// </summary>
     public class MainWorker : BaseWorker
     {
+        private const string LogName = "MainService";
+
         private readonly IMainService mainService;
         private readonly ILogService logService;
         private readonly ILogger<MainWorker> logger;
@@ -28,7 +30,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="baseWorkerDependencyAggregate"></param>
         public MainWorker(IOptions<AisSettings> aisSettings, IMainService mainService, ILogService logService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            Initialize("Main", aisSettings.Value.MainService.RunScheme, true);
+            Initialize(LogName, aisSettings.Value.MainService.RunScheme, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.mainService = mainService;
@@ -47,9 +49,9 @@ namespace AutoImportServiceCore.Core.Workers
         /// <inheritdoc />
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
+            await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
             await mainService.StopAllConfigurations();
-            logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
+            await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
             await base.StopAsync(cancellationToken);
         }
     }

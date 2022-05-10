@@ -18,7 +18,7 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
 
         /// <summary>
         /// Log information.
@@ -31,7 +31,7 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
 
         /// <summary>
         /// Log a warning.
@@ -44,7 +44,7 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
 
         /// <summary>
         /// Log an error.
@@ -57,7 +57,7 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
 
         /// <summary>
         /// Log critical.
@@ -70,7 +70,7 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
 
         /// <summary>
         /// Log a message.
@@ -84,6 +84,6 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName = "", int timeId = -1, int order = -1);
+        Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = -1, int order = -1);
     }
 }

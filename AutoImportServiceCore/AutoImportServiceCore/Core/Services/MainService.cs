@@ -26,6 +26,8 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
+        private const string LogName = "MainService";
+
         private readonly string localConfiguration;
         private readonly string localOAuthConfiguration;
         private readonly IServiceProvider serviceProvider;
@@ -160,7 +162,7 @@ namespace AutoImportServiceCore.Core.Services
             {
                 await configurationStopTasks[i];
 
-                logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
             }
         }
 

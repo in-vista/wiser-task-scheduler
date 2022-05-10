@@ -68,7 +68,7 @@ namespace AutoImportServiceCore.Core.Workers
         {
             try
             {
-                logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
+                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
 
                 if (!RunImmediately)
                 {
@@ -77,7 +77,7 @@ namespace AutoImportServiceCore.Core.Workers
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
 
                     var stopWatch = new Stopwatch();
                     stopWatch.Start();
@@ -86,18 +86,18 @@ namespace AutoImportServiceCore.Core.Workers
 
                     stopWatch.Stop();
 
-                    logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
 
                     await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.", Name, RunScheme.TimeId);
+                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.", Name, RunScheme.TimeId);
             }
             catch (Exception e)
             {
-                logService.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
+                await logService.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
             }
         }
 

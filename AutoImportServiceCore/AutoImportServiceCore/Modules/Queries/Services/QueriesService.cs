@@ -7,7 +7,6 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Core.Services;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;

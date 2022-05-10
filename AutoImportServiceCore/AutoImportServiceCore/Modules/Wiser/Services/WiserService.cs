@@ -107,7 +107,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             };
             request.Headers.Add("Accept", "application/json");
             
-            logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}");
+            logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
             
             using var client = new HttpClient();
             try
@@ -115,13 +115,13 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 var response = client.Send(request);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.");
+                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
                     return;
                 }
 
                 using var reader = new StreamReader(response.Content.ReadAsStream());
                 var body = reader.ReadToEnd();
-                logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}");
+                logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
                 var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
                 accessToken = wiserLoginResponse.AccessToken;
@@ -130,7 +130,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             }
             catch (Exception e)
             {
-                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}");
+                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
             }
         }
 
@@ -150,7 +150,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
 
                     if (response.StatusCode != HttpStatusCode.OK)
                     {
-                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.");
+                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
                         return null;
                     }
 
@@ -162,7 +162,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
                 }
                 catch (Exception e)
                 {
-                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}");
+                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
                     return null;
                 }
             });

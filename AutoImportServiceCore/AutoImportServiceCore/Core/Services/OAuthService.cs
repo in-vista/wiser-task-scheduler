@@ -5,7 +5,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models.OAuth;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -21,15 +20,19 @@ namespace AutoImportServiceCore.Core.Services
 {
     public class OAuthService : IOAuthService, ISingletonService
     {
+        private const string LogName = "OAuthService";
+
         private readonly GclSettings gclSettings;
+        private readonly ILogService logService;
         private readonly ILogger<OAuthService> logger;
         private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
 
-        public OAuthService(IOptions<GclSettings> gclSettings, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
+        public OAuthService(IOptions<GclSettings> gclSettings, ILogService logService, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
             this.gclSettings = gclSettings.Value;
+            this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
         }
@@ -81,7 +84,7 @@ namespace AutoImportServiceCore.Core.Services
                     OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.");
+                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
 
                         failState = OAuthState.FailedLogin;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
@@ -90,7 +93,7 @@ namespace AutoImportServiceCore.Core.Services
                     }
                     else
                     {
-                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.");
+                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
                         failState = OAuthState.FailedRefreshToken;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
@@ -119,7 +122,7 @@ namespace AutoImportServiceCore.Core.Services
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        LogHelper.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}");
+                        logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
                         return failState;
                     }
 
@@ -140,7 +143,7 @@ namespace AutoImportServiceCore.Core.Services
 
                     oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
 
-                    LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}");
+                    logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
 
                     return OAuthState.NewToken;
                 }
