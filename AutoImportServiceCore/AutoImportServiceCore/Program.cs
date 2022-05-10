@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
@@ -10,7 +9,10 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Services;
+using GeeksCoreLibrary.Modules.Objects.Interfaces;
+using GeeksCoreLibrary.Modules.Objects.Services;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Serilog;
 
@@ -71,7 +73,9 @@ namespace AutoImportServiceCore
         private static void ConfigureAisServices(IServiceCollection services)
         {
             services.AddScoped<ConfigurationsWorker>();
-            services.AddScoped<AisDatabaseConnection>();
+            services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
+            services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
+            services.AddScoped<IObjectsService, ObjectsService>();
 
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
