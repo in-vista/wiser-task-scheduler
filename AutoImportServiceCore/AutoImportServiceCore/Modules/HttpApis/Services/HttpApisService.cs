@@ -86,14 +86,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
                 if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
                 {
-                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", indexRows, configurationServiceName));
+                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", indexRows, configurationServiceName, forcedIndex: i));
                 }
                 else
                 {
                     var url = httpApi.Url;
                     do
                     {
-                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url);
+                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url, i);
                         url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));
@@ -115,7 +115,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="overrideUrl">The url to use instead of the provided url, used for continuous calls with a next URL.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string configurationServiceName, string overrideUrl = "")
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string configurationServiceName, string overrideUrl = "", int forcedIndex = -1)
         {
             var url = String.IsNullOrWhiteSpace(overrideUrl) ? httpApi.Url : overrideUrl;
 
@@ -165,7 +165,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             if (httpApi.Body != null)
             {
-                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets);
+                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets, forcedIndex);
 
                 await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}", configurationServiceName, httpApi.TimeId, httpApi.Order);
                 request.Content = new StringContent(body)
