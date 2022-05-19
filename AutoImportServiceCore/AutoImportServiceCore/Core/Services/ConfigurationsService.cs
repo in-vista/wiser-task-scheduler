@@ -80,7 +80,8 @@ namespace AutoImportServiceCore.Core.Services
             {
                 configuration.Queries,
                 configuration.HttpApis,
-                configuration.GenerateFileModels
+                configuration.GenerateFileModels,
+                configuration.ImportFileModels
             };
 
             var allActions = new List<ActionModel>();
