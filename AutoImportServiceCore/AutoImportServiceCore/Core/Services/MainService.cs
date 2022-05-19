@@ -14,6 +14,8 @@ using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -30,6 +32,7 @@ namespace AutoImportServiceCore.Core.Services
 
         private readonly string localConfiguration;
         private readonly string localOAuthConfiguration;
+        private readonly GclSettings gclSettings;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
         private readonly IOAuthService oAuthService;
@@ -46,10 +49,11 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogService logService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogService logService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             localOAuthConfiguration = aisSettings.Value.MainService.LocalOAuthConfiguration;
+            this.gclSettings = gclSettings.Value;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
             this.oAuthService = oAuthService;
@@ -185,7 +189,13 @@ namespace AutoImportServiceCore.Core.Services
 
                 foreach (var wiserConfiguration in wiserConfigurations)
                 {
-                    if(String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
+                    // Decrypt configurations if they have been encrypted.
+                    if (!String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue) && !wiserConfiguration.EditorValue.StartsWith("{") && !wiserConfiguration.EditorValue.StartsWith("<"))
+                    {
+                        wiserConfiguration.EditorValue = wiserConfiguration.EditorValue.DecryptWithAes(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+                    }
+
+                    if (String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
 
                     if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
                     {
