@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
@@ -15,10 +16,12 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
 {
     public class ImportFilesService : IImportFilesService, IActionsService, IScopedService
     {
+        private readonly ILogService logService;
         private readonly ILogger<ImportFilesService> logger;
 
-        public ImportFilesService(ILogger<ImportFilesService> logger)
+        public ImportFilesService(ILogService logService, ILogger<ImportFilesService> logger)
         {
+            this.logService = logService;
             this.logger = logger;
         }
 
@@ -28,7 +31,6 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
         /// <inheritdoc />
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
-            //TODO load multiple files
             var importFile = (ImportFileModel) action;
 
             if (importFile.Separator.Equals("\\t"))
@@ -36,36 +38,83 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
                 importFile.Separator = '\t'.ToString();
             }
 
-            return await ImportFile(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
+            if (importFile.SingleFile)
+            {
+                return await ImportFile(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
+            }
+
+            var rows = ResultSetHelper.GetCorrectObject<JArray>(importFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+
+            var jArray = new JArray();
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var indexRows = new List<int> { i };
+                jArray.Add(await ImportFile(importFile, indexRows, resultSets, configurationServiceName, $"{importFile.UseResultSet}[{i}]"));
+            }
+
+            return new JObject
+            {
+                {"Results", jArray}
+            };
         }
 
-        public async Task<JObject> ImportFile(ImportFileModel importFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet)
+        /// <summary>
+        /// Import a file.
+        /// </summary>
+        /// <param name="importFile">The information for the file to be imported.</param>
+        /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
+        /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+        /// <param name="configurationServiceName">The name of the configuration that contains this action.</param>
+        /// <param name="useResultSet">The name of the result set to use, either the value as defined or added with an index.</param>
+        /// <returns></returns>
+        private async Task<JObject> ImportFile(ImportFileModel importFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet)
         {
             var filePath = importFile.FilePath;
+            
+            // Replace the file path if a result set is used.
+            if (!String.IsNullOrWhiteSpace(useResultSet))
+            {
+                var keyParts = useResultSet.Split('.');
+                var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
+                var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
-            //TODO file path replacements.
+                var tuple = ReplacementHelper.PrepareText(filePath, usingResultSet, remainingKey);
+
+                filePath = ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet);
+            }
 
             if (!File.Exists(filePath))
             {
-                //TODO return result set.
-                return null;
+                await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file '{importFile.FilePath}'. Path does not exists.", configurationServiceName, importFile.TimeId, importFile.Order);
+
+                return new JObject()
+                {
+                    {"Success", false}
+                };
             }
 
             try
             {
+                await logService.LogInformation(logger, LogScopes.RunBody, importFile.LogSettings, $"Importing file {filePath}.", configurationServiceName, importFile.TimeId, importFile.Order);
                 var lines = await File.ReadAllLinesAsync(filePath);
                 var jArray = new JArray();
 
                 if (!importFile.HasFieldNames)
                 {
-                    //TODO check if result set replacements can handle [0][1] combinations, otherwise row in object before array.
                     foreach (var line in lines)
                     {
-                        jArray.Add(new JArray(line.Split(importFile.Separator)));
+                        var columns = new JArray(line.Split(importFile.Separator));
+                        var row = new JObject()
+                        {
+                            {"Columns", columns }
+                        };
+                        jArray.Add(row);
                     }
 
-                    return new JObject
+                    return new JObject()
                     {
+                        {"Success", true},
                         {"Results", jArray}
                     };
                 }
@@ -85,17 +134,27 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
                     jArray.Add(row);
                 }
 
-                //TODO add field names to result set.
-                return new JObject
+                var fieldArray = new JArray();
+                foreach (var fieldName in fieldNames)
                 {
+                    fieldArray.Add(fieldName);
+                }
+                
+                return new JObject()
+                {
+                    {"Success", true},
+                    {"Fields",  fieldArray},
                     {"Results", jArray}
                 };
             }
             catch (Exception e)
             {
-                //TODO log exception and return result set.
+                await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file '{importFile.FilePath}'.\n{e}", configurationServiceName, importFile.TimeId, importFile.Order);
 
-                return null;
+                return new JObject()
+                {
+                    {"Success", false}
+                };
             }
         }
     }

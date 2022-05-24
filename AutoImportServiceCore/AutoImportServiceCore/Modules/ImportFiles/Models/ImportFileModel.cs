@@ -22,5 +22,10 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Models
         /// If true columns can be requested by field name, if false the index need to be given to request a column.
         /// </summary>
         public bool HasFieldNames { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets if a single file is imported.
+        /// </summary>
+        public bool SingleFile { get; set; } = true;
     }
 }
