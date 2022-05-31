@@ -173,7 +173,17 @@ namespace AutoImportServiceCore.Core.Services
             {
                 var parts = action.OnlyWithStatusCode.Split(",");
 
-                if ((string)(ResultSetHelper.GetCorrectObject<JObject>(parts[0], ReplacementHelper.EmptyRows, resultSets)["StatusCode"]) != parts[1])
+                if ((string)ResultSetHelper.GetCorrectObject<JObject>(parts[0], ReplacementHelper.EmptyRows, resultSets)["StatusCode"] != parts[1])
+                {
+                    return true;
+                }
+            }
+
+            if (!String.IsNullOrWhiteSpace(action.OnlyWithSuccessState))
+            {
+                var parts = action.OnlyWithSuccessState.Split(",");
+
+                if ((string) ResultSetHelper.GetCorrectObject<JObject>(parts[0], ReplacementHelper.EmptyRows, resultSets)["Success"] != parts[1])
                 {
                     return true;
                 }
