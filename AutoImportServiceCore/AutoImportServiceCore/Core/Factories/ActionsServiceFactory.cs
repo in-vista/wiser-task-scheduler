@@ -5,6 +5,8 @@ using AutoImportServiceCore.Modules.GenerateFiles.Interfaces;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Interfaces;
 using AutoImportServiceCore.Modules.HttpApis.Models;
+using AutoImportServiceCore.Modules.ImportFiles.Interfaces;
+using AutoImportServiceCore.Modules.ImportFiles.Models;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -39,6 +41,8 @@ namespace AutoImportServiceCore.Core.Factories
                     return serviceProvider.GetRequiredService<IHttpApisService>() as IActionsService;
                 case GenerateFileModel:
                     return serviceProvider.GetRequiredService<IGenerateFileService>() as IActionsService;
+                case ImportFileModel:
+                    return serviceProvider.GetRequiredService<IImportFilesService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

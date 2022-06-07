@@ -58,13 +58,19 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
 
+            // Enforce the set character set and collation that is used during the execution of this action.
+            databaseConnection.AddParameter("characterSet", query.CharacterEncoding.CharacterSet);
+            databaseConnection.AddParameter("collation", query.CharacterEncoding.Collation);
+            await databaseConnection.GetAsync("SET NAMES ?characterSet COLLATE ?collation", cleanUp: false);
+            databaseConnection.ClearParameters();
+
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
 
             // If not using a result set execute the query as given.
             if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
                 await logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}", configurationServiceName, query.TimeId, query.Order);
-                var dataTable = await databaseConnection.GetAsync(query.Query, cleanUp: true);
+                var dataTable = await databaseConnection.GetAsync(query.Query);
                 return GetResultSetFromDataTable(dataTable);
             }
 
@@ -85,7 +91,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                     databaseConnection.AddParameter(parameter.Key, parameter.Value);
                 }
 
-                var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: true);
+                var dataTable = await databaseConnection.GetAsync(queryString);
                 return GetResultSetFromDataTable(dataTable);
             }
 

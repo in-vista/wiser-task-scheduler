@@ -107,9 +107,13 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
             {
                 await logService.LogError(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Failed to generate file '{fileName}' at '{fileLocation}'.\n{e}", configurationServiceName, generateFile.TimeId, generateFile.Order);
             }
-
-            var result = $"{{ 'FileName': '{fileName}', 'FileLocation': '{fileLocation}', 'FileGenerated': {fileGenerated.ToString().ToLower()} }}";
-            return JObject.Parse(result);
+            
+            return new JObject()
+            {
+                {"FileName", fileName},
+                {"FileLocation", fileLocation},
+                {"Success", fileGenerated}
+            };
         }
     }
 }
