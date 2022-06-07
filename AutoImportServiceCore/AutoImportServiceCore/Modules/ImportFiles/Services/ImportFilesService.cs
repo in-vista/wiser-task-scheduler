@@ -102,9 +102,15 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
 
                 if (!importFile.HasFieldNames)
                 {
-                    foreach (var line in lines)
+                    for (var i = 0; i < lines.Length; i++)
                     {
-                        var columns = new JArray(line.Split(importFile.Separator));
+                        if (String.IsNullOrWhiteSpace(lines[i]))
+                        {
+                            await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                            continue;
+                        }
+
+                        var columns = new JArray(lines[i].Split(importFile.Separator));
                         var row = new JObject()
                         {
                             {"Columns", columns }
@@ -124,6 +130,12 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
                 for (var i = 1; i < lines.Length; i++)
                 {
                     var row = new JObject();
+
+                    if (String.IsNullOrWhiteSpace(lines[i]))
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                        continue;
+                    }
 
                     var columns = lines[i].Split(importFile.Separator);
                     for (var j = 0; j < fieldNames.Length; j++)
