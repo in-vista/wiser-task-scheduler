@@ -102,6 +102,8 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
 
                 if (!importFile.HasFieldNames)
                 {
+                    var firstColumnLenght = -1;
+
                     for (var i = 0; i < lines.Length; i++)
                     {
                         if (String.IsNullOrWhiteSpace(lines[i]))
@@ -111,6 +113,18 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
                         }
 
                         var columns = new JArray(lines[i].Split(importFile.Separator));
+
+                        // Use the first row to determine the number of columns to be expected in each row.
+                        if (firstColumnLenght == -1)
+                        {
+                            firstColumnLenght = columns.Count;
+                        }
+                        else if(columns.Count != firstColumnLenght)
+                        {
+                            await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                            continue;
+                        }
+
                         var row = new JObject()
                         {
                             {"Columns", columns }
@@ -138,6 +152,13 @@ namespace AutoImportServiceCore.Modules.ImportFiles.Services
                     }
 
                     var columns = lines[i].Split(importFile.Separator);
+
+                    if (columns.Length != fieldNames.Length)
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                        continue;
+                    }
+
                     for (var j = 0; j < fieldNames.Length; j++)
                     {
                         row.Add(fieldNames[j], columns[j]);
