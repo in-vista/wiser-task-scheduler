@@ -2,6 +2,7 @@
 using System.Xml.Serialization;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Models;
+using AutoImportServiceCore.Modules.ImportFiles.Models;
 using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 
@@ -62,5 +63,12 @@ namespace AutoImportServiceCore.Core.Models
         [XmlArray("GenerateFiles")]
         [XmlArrayItem(typeof(GenerateFileModel))]
         public GenerateFileModel[] GenerateFileModels { get; set; }
+
+        /// <summary>
+        /// Gets or sets the import files.
+        /// </summary>
+        [XmlArray("ImportFiles")]
+        [XmlArrayItem(typeof(ImportFileModel))]
+        public ImportFileModel[] ImportFileModels { get; set; }
     }
 }
