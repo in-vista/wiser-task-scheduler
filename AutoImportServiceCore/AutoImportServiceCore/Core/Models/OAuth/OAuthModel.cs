@@ -47,6 +47,26 @@ namespace AutoImportServiceCore.Core.Models.OAuth
         }
 
         /// <summary>
+        /// Gets or sets the key in the response that points to the access token.
+        /// </summary>
+        public string AccessTokenResponseKey { get; set; } = "access_token";
+        
+        /// <summary>
+        /// Gets or sets the key in the response that points to the token type.
+        /// </summary>
+        public string TokenTypeResponseKey { get; set; } = "token_type";
+        
+        /// <summary>
+        /// Gets or sets the key in the response that points to the refresh token.
+        /// </summary>
+        public string RefreshTokenResponseKey { get; set; } = "refresh_token";
+        
+        /// <summary>
+        /// Gets or sets the key in the response that points to the expires in time.
+        /// </summary>
+        public string ExpiresInResponseKey { get; set; } = "expires_in";
+
+        /// <summary>
         /// Gets or sets the log settings.
         /// </summary>
         public LogSettings LogSettings { get; set; }

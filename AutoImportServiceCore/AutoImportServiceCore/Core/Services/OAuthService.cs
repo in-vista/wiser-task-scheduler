@@ -128,17 +128,17 @@ namespace AutoImportServiceCore.Core.Services
 
                     var body = JObject.Parse(json);
 
-                    oAuthApi.AccessToken = (string)body["access_token"];
-                    oAuthApi.TokenType = (string) body["token_type"];
-                    oAuthApi.RefreshToken = (string) body["refresh_token"];
+                    oAuthApi.AccessToken = (string)body[oAuthApi.AccessTokenResponseKey];
+                    oAuthApi.TokenType = (string) body[oAuthApi.TokenTypeResponseKey];
+                    oAuthApi.RefreshToken = (string) body[oAuthApi.RefreshTokenResponseKey];
 
-                    if (body["expires_in"].Type == JTokenType.Integer)
+                    if (body[oAuthApi.ExpiresInResponseKey].Type == JTokenType.Integer)
                     {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int)body["expires_in"]);
+                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int)body[oAuthApi.ExpiresInResponseKey]);
                     }
                     else
                     {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string)body["expires_in"]));
+                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string)body[oAuthApi.ExpiresInResponseKey]));
                     }
 
                     oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
