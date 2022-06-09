@@ -2,7 +2,7 @@
 using AutoImportServiceCore.Modules.RunSchemes.Enums;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 
-namespace AutoImportServiceCore.Core.Models
+namespace AutoImportServiceCore.Core.Models.Cleanup
 {
     public class CleanupServiceSettings
     {
@@ -23,5 +23,10 @@ namespace AutoImportServiceCore.Core.Models
         {
             Type = RunSchemeTypes.Daily
         };
+
+        /// <summary>
+        /// Gets or sets a configuration that needs to be used for cleanup from the local disk instead of loading it from Wiser.
+        /// </summary>
+        public string LocalCleanupConfiguration { get; set; }
     }
 }
