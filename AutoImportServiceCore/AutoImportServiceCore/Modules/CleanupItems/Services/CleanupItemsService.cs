@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.CleanupItems.Interfaces;
@@ -45,6 +47,8 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
     {
         var cleanupItem = (CleanupItemModel) action;
 
+        await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Starting cleanup for items of entity '{cleanupItem.EntityName}' that are older than '{cleanupItem.TimeToStore}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+
         using var scope = serviceProvider.CreateScope();
         using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
@@ -64,20 +68,56 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupItem.EntityName);
         
         databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
-        databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupItem.NumberOfDaysToStore));
-        var dataTable = await databaseConnection.GetAsync($"SELECT id FROM {tablePrefix}{WiserTableNames.WiserItem}{(cleanupItem.FromArchive ? WiserTableNames.ArchiveSuffix : "")} WHERE entity_type = ?entityName AND {(cleanupItem.SinceLastChange ? "changed_on" : "added_on")} < ?cleanupDate");
+        var entityDataTable = await databaseConnection.GetAsync($"SELECT delete_action FROM {WiserTableNames.WiserEntity} WHERE `name` = ?entityName LIMIT 1");
+        var deleteAction = entityDataTable.Rows[0].Field<string>("delete_action");
+        
+        var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
+        databaseConnection.AddParameter("cleanupDate", cleanupDate);
 
-        if (dataTable.Rows.Count == 0)
+        var query = $@"SELECT id
+FROM {tablePrefix}{WiserTableNames.WiserItem}
+WHERE entity_type = ?entityName
+AND TIMEDIFF({(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0";
+        
+        var itemsDataTable = await databaseConnection.GetAsync(query);
+
+        if (itemsDataTable.Rows.Count == 0)
         {
-            return null;
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', no items found to cleanup.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+
+            return new JObject()
+            {
+                {"Success", true},
+                {"Entity", cleanupItem.EntityName},
+                {"CleanupDate", cleanupDate},
+                {"ItemsToCleanup", 0},
+                {"DeleteAction", deleteAction}
+            };
         }
 
-        var ids = new List<ulong>();
-        foreach (DataRow row in dataTable.Rows)
+        var ids = (from DataRow row in itemsDataTable.Rows
+                   select row.Field<ulong>("id")).ToList();
+
+        var success = true;
+        
+        try
         {
-            ids.Add(row.Field<ulong>("id"));
+            await wiserItemsService.DeleteAsync(ids, username: "AIS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+        }
+        catch (Exception e)
+        {
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{e}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            success = false;
         }
         
-        return null;
+        return new JObject()
+        {
+            {"Success", success},
+            {"Entity", cleanupItem.EntityName},
+            {"CleanupDate", cleanupDate},
+            {"ItemsToCleanup", itemsDataTable.Rows.Count},
+            {"DeleteAction", deleteAction}
+        };
     }
 }

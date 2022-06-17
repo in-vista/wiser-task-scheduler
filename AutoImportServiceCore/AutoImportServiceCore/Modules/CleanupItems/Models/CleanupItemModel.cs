@@ -1,4 +1,7 @@
-﻿using System.Xml.Serialization;
+﻿using System;
+using System.ComponentModel;
+using System.Xml;
+using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Models;
 
 namespace AutoImportServiceCore.Modules.CleanupItems.Models
@@ -12,9 +15,22 @@ namespace AutoImportServiceCore.Modules.CleanupItems.Models
         public string EntityName { get; set; }
 
         /// <summary>
-        /// Gets or sets the number of days before the action needs to be performed on the items of the given entity.
+        /// Gets or sets the time before the action needs to be performed on the items of the given entity.
         /// </summary>
-        public int NumberOfDaysToStore { get; set; }
+        [XmlIgnore]
+        public TimeSpan TimeToStore { get; set; }
+        
+        /// <summary>
+        /// Gets or sets <see cref="TimeToStore"/> from a XML file.
+        /// </summary>
+        [Browsable(false)]
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        [XmlElement("TimeToStore")]
+        public string DelayString
+        {
+            get => XmlConvert.ToString(TimeToStore);
+            set => TimeToStore = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);
+        }
 
         /// <summary>
         /// Gets or sets if the "changed_on" column needs to be used instead of the "added_on" column.
@@ -22,18 +38,13 @@ namespace AutoImportServiceCore.Modules.CleanupItems.Models
         public bool SinceLastChange { get; set; }
 
         /// <summary>
-        /// Gets or sets if the action needs to be performed on the items of the given entity in the archive tables.
-        /// </summary>
-        public bool FromArchive { get; set; }
-
-        /// <summary>
         /// Gets or sets the connection string to use for the cleanup of this entity to manage multiple customers from a single AIS.
         /// </summary>
         public string ConnectionString { get; set; }
 
         /// <summary>
-        /// Gets or sets the log settings.
+        /// Gets or sets if the history needs to be saved.
         /// </summary>
-        public LogSettings LogSettings { get; set; }
+        public bool SaveHistory { get; set; } = true;
     }
 }
