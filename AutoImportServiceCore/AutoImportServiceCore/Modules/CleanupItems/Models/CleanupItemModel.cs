@@ -26,7 +26,7 @@ namespace AutoImportServiceCore.Modules.CleanupItems.Models
         [Browsable(false)]
         [EditorBrowsable(EditorBrowsableState.Never)]
         [XmlElement("TimeToStore")]
-        public string DelayString
+        public string TimeToStoreString
         {
             get => XmlConvert.ToString(TimeToStore);
             set => TimeToStore = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);

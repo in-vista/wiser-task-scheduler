@@ -67,10 +67,12 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupItem.EntityName);
         
+        // Get the delete action of the entity to show it in the logs.
         databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
         var entityDataTable = await databaseConnection.GetAsync($"SELECT delete_action FROM {WiserTableNames.WiserEntity} WHERE `name` = ?entityName LIMIT 1");
         var deleteAction = entityDataTable.Rows[0].Field<string>("delete_action");
         
+        // Get all IDs from items that need to be cleaned.
         var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
 
@@ -88,7 +90,7 @@ AND TIMEDIFF({(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?clean
             return new JObject()
             {
                 {"Success", true},
-                {"Entity", cleanupItem.EntityName},
+                {"EntityName", cleanupItem.EntityName},
                 {"CleanupDate", cleanupDate},
                 {"ItemsToCleanup", 0},
                 {"DeleteAction", deleteAction}
@@ -114,7 +116,7 @@ AND TIMEDIFF({(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?clean
         return new JObject()
         {
             {"Success", success},
-            {"Entity", cleanupItem.EntityName},
+            {"EntityName", cleanupItem.EntityName},
             {"CleanupDate", cleanupDate},
             {"ItemsToCleanup", itemsDataTable.Rows.Count},
             {"DeleteAction", deleteAction}
