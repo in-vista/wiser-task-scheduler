@@ -109,7 +109,7 @@ AND TIMEDIFF({(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?clean
         }
         catch (Exception e)
         {
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{e}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            await logService.LogError(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{e}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
             success = false;
         }
         
