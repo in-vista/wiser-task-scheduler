@@ -136,7 +136,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             foreach (var header in httpApi.Headers)
             {
-                if (string.IsNullOrWhiteSpace(header.UseResultSet))
+                if (String.IsNullOrWhiteSpace(header.UseResultSet))
                 {
                     request.Headers.Add(header.Name, header.Value);
                 }
