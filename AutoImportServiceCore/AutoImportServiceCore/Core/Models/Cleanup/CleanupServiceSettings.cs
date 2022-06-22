@@ -23,10 +23,5 @@ namespace AutoImportServiceCore.Core.Models.Cleanup
         {
             Type = RunSchemeTypes.Daily
         };
-
-        /// <summary>
-        /// Gets or sets a configuration that needs to be used for cleanup from the local disk instead of loading it from Wiser.
-        /// </summary>
-        public string LocalCleanupConfiguration { get; set; }
     }
 }
