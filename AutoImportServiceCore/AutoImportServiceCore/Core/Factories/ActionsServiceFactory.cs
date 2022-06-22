@@ -1,6 +1,8 @@
 ﻿using System;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.CleanupItems.Interfaces;
+using AutoImportServiceCore.Modules.CleanupItems.Models;
 using AutoImportServiceCore.Modules.Branches.Interfaces;
 using AutoImportServiceCore.Modules.Branches.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Interfaces;
@@ -45,6 +47,8 @@ namespace AutoImportServiceCore.Core.Factories
                     return serviceProvider.GetRequiredService<IGenerateFileService>() as IActionsService;
                 case ImportFileModel:
                     return serviceProvider.GetRequiredService<IImportFilesService>() as IActionsService;
+                case CleanupItemModel:
+                    return serviceProvider.GetRequiredService<ICleanupItemsService>() as IActionsService;
                 case BranchQueueModel:
                     return serviceProvider.GetRequiredService<IBranchQueueService>() as IActionsService;
                 default:
