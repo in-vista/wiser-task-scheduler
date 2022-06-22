@@ -38,6 +38,16 @@ namespace AutoImportServiceCore.Modules.CleanupItems.Models
         public bool SinceLastChange { get; set; }
 
         /// <summary>
+        /// Gets or sets if the item is only allowed to be cleaned up when it does not have a parent and is not a connected item in an item link.
+        /// </summary>
+        public bool OnlyWhenNotConnectedItem { get; set; }
+
+        /// <summary>
+        /// Gets or sets if the item is only allowed to be cleaned up when it does not have children and is not a destination in an item link. 
+        /// </summary>
+        public bool OnlyWhenNotDestinationItem { get; set; }
+
+        /// <summary>
         /// Gets or sets the connection string to use for the cleanup of this entity to manage multiple customers from a single AIS.
         /// </summary>
         public string ConnectionString { get; set; }

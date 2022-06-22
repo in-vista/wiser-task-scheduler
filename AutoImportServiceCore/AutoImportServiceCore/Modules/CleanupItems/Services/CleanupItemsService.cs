@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
@@ -76,10 +77,40 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
 
-        var query = $@"SELECT id
-FROM {tablePrefix}{WiserTableNames.WiserItem}
-WHERE entity_type = ?entityName
-AND TIMEDIFF({(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0";
+        var joins = new StringBuilder();
+        var wheres = new StringBuilder();
+
+        // Add extra checks if the item is not allowed to be a connected item.
+        if (cleanupItem.OnlyWhenNotConnectedItem)
+        {
+            joins.Append("LEFT JOIN wiser_itemlink AS itemLink ON itemLink.item_id = item.id");
+            
+            wheres.Append(@"AND item.parent_item_id = 0
+AND itemLink.id IS NULL");
+        }
+
+        // Add extra checks if the item is not allowed to be a destination item. When combined with OnlyWhenNotConnectedItem the checks need to be added to the existing ones.
+        if (cleanupItem.OnlyWhenNotDestinationItem)
+        {
+            joins.Append(cleanupItem.OnlyWhenNotConnectedItem ? " OR itemLink.destination_item_id = item.id" : "LEFT JOIN wiser_itemlink AS itemLink ON itemLink.destination_item_id = item.id");
+            joins.Append(@"
+LEFT JOIN wiser_item AS child ON child.parent_item_id = item.id");
+
+            if (!cleanupItem.OnlyWhenNotConnectedItem)
+            {
+                wheres.Append(@"AND itemLink.id IS NULL");
+            }
+            
+            wheres.Append(@"
+AND child.id IS NULL");
+        }
+
+        var query = $@"SELECT item.id
+FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
+{joins}
+WHERE item.entity_type = ?entityName
+AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0
+{wheres}";
         
         var itemsDataTable = await databaseConnection.GetAsync(query);
 
