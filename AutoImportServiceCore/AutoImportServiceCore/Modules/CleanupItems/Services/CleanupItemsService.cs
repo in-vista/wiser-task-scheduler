@@ -83,26 +83,48 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         // Add extra checks if the item is not allowed to be a connected item.
         if (cleanupItem.OnlyWhenNotConnectedItem)
         {
-            joins.Append("LEFT JOIN wiser_itemlink AS itemLink ON itemLink.item_id = item.id");
+            joins.Append($"LEFT JOIN {WiserTableNames.WiserItemLink} AS itemLink ON itemLink.item_id = item.id {(cleanupItem.OnlyWhenNotDestinationItem ? "OR itemLink.destination_item_id = item.id" : "")}");
             
             wheres.Append(@"AND item.parent_item_id = 0
 AND itemLink.id IS NULL");
+
+            // Add checks for dedicated link tables if the item is set as connected item entity.
+            var dedicatedLinkTypes = await GetDedicatedLinkTypes(databaseConnection, cleanupItem.EntityName, false);
+            for (var i = 0; i < dedicatedLinkTypes.Count; i++)
+            {
+                joins.Append($@"
+LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS connectedItemLink{i} ON connectedItemLink{i}.item_id = item.id");
+
+                wheres.Append($@"
+AND connectedItemLink{i}.id IS NULL");
+            }
         }
 
         // Add extra checks if the item is not allowed to be a destination item. When combined with OnlyWhenNotConnectedItem the checks need to be added to the existing ones.
         if (cleanupItem.OnlyWhenNotDestinationItem)
         {
-            joins.Append(cleanupItem.OnlyWhenNotConnectedItem ? " OR itemLink.destination_item_id = item.id" : "LEFT JOIN wiser_itemlink AS itemLink ON itemLink.destination_item_id = item.id");
-            joins.Append(@"
-LEFT JOIN wiser_item AS child ON child.parent_item_id = item.id");
-
             if (!cleanupItem.OnlyWhenNotConnectedItem)
             {
+                joins.Append($"LEFT JOIN {WiserTableNames.WiserItemLink} AS itemLink ON itemLink.destination_item_id = item.id");
                 wheres.Append(@"AND itemLink.id IS NULL");
             }
             
+            joins.Append($@"
+LEFT JOIN {tablePrefix}wiser_item AS child ON child.parent_item_id = item.id");
+            
             wheres.Append(@"
 AND child.id IS NULL");
+            
+            // Add checks for dedicated link tables if the item is set as destination entity.
+            var dedicatedLinkTypes = await GetDedicatedLinkTypes(databaseConnection, cleanupItem.EntityName, true);
+            for (var i = 0; i < dedicatedLinkTypes.Count; i++)
+            {
+                joins.Append($@"
+LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS destinationItemLink{i} ON destinationItemLink{i}.item_id = item.id");
+
+                wheres.Append($@"
+AND destinationItemLink{i}.id IS NULL");
+            }
         }
 
         var query = $@"SELECT item.id
@@ -135,8 +157,8 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
         
         try
         {
-            await wiserItemsService.DeleteAsync(ids, username: "AIS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true);
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            //await wiserItemsService.DeleteAsync(ids, username: "AIS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true);
+            //await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
         }
         catch (Exception e)
         {
@@ -152,5 +174,36 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
             {"ItemsToCleanup", itemsDataTable.Rows.Count},
             {"DeleteAction", deleteAction}
         };
+    }
+
+    /// <summary>
+    /// Get the types of links that have a dedicated table.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="entityName">The name of the entity that the link needs to be for.</param>
+    /// <param name="destinationInsteadOfConnectedItem">True to check if entity is destination, false to check if entity is connected item.</param>
+    /// <returns>Returns a list with the types.</returns>
+    private async Task<List<int>> GetDedicatedLinkTypes(IDatabaseConnection databaseConnection, string entityName, bool destinationInsteadOfConnectedItem)
+    {
+        databaseConnection.AddParameter("entityName", entityName);
+        
+        var query = $@"SELECT link.type
+FROM {WiserTableNames.WiserLink} AS link
+WHERE link.use_dedicated_table = true
+AND link.{(destinationInsteadOfConnectedItem ? "destination_entity_type" : "connected_entity_type")} = 'testmark6'";
+
+        var dataTable = await databaseConnection.GetAsync(query);
+
+        var dedicatedLinkTypes = new List<int>();
+
+        if (dataTable.Rows.Count == 0)
+        {
+            return dedicatedLinkTypes;
+        }
+
+        dedicatedLinkTypes.AddRange(from DataRow row in dataTable.Rows
+                                    select row.Field<int>("type"));
+
+        return dedicatedLinkTypes;
     }
 }
