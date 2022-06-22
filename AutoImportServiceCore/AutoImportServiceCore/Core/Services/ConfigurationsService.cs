@@ -81,8 +81,7 @@ namespace AutoImportServiceCore.Core.Services
                 configuration.Queries,
                 configuration.HttpApis,
                 configuration.GenerateFileModels,
-                configuration.ImportFileModels,
-                configuration.BranchQueueModels
+                configuration.ImportFileModels
             };
 
             var allActions = new List<ActionModel>();
@@ -98,6 +97,11 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     allActions.AddRange(actionSet);
                 }
+            }
+
+            if (configuration.BranchQueueModel != null)
+            {
+                allActions.Add(configuration.BranchQueueModel);
             }
 
             return allActions;

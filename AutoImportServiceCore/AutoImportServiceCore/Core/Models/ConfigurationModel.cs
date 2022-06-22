@@ -75,8 +75,7 @@ namespace AutoImportServiceCore.Core.Models
         /// <summary>
         /// Gets or sets the branch queue models.
         /// </summary>
-        [XmlArray("BranchQueueModels")]
-        [XmlArrayItem(typeof(BranchQueueModel))]
-        public BranchQueueModel[] BranchQueueModels { get; set; }
+        [XmlElement("BranchQueue")]
+        public BranchQueueModel BranchQueueModel { get; set; }
     }
 }

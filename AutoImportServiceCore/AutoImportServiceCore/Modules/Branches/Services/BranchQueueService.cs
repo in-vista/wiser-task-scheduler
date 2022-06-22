@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
@@ -8,10 +10,16 @@ using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.Branches.Interfaces;
 using AutoImportServiceCore.Modules.Branches.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Branches.Enumerations;
+using GeeksCoreLibrary.Modules.Branches.Helpers;
+using GeeksCoreLibrary.Modules.Branches.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -48,6 +56,7 @@ namespace AutoImportServiceCore.Modules.Branches.Services
             using var scope = serviceProvider.CreateScope();
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
             
             var branchQueue = (BranchQueueModel) action;
             
@@ -72,10 +81,10 @@ ORDER BY start_on ASC, id ASC");
                 switch (branchAction)
                 {
                     case "create":
-                        await HandleCreateBranchActionAsync(dataRow, databaseConnection, databaseHelpersService);
+                        await HandleCreateBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService);
                         break;
                     case "merge":
-                        await HandleMergeBranchActionAsync(dataRow, databaseConnection, databaseHelpersService);
+                        await HandleMergeBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService);
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(branchAction), branchAction);
@@ -86,45 +95,46 @@ ORDER BY start_on ASC, id ASC");
             return new JObject();
         }
 
-        private async Task HandleCreateBranchActionAsync(DataRow dataRowWithSettings, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+        private async Task HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
-            // Add the new customer environment to easy_customers.
-            var newCustomer = new CustomerModel
+            var queueId = dataRowWithSettings.Field<int>("dataRowWithSettings");
+            var settings = JsonConvert.DeserializeObject<CreateBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
+            if (String.IsNullOrWhiteSpace(settings?.DatabaseName))
             {
-                CustomerId = currentCustomer.CustomerId,
-                Name = newCustomerName,
-                EncryptionKey = SecurityHelpers.GenerateRandomPassword(20),
-                SubDomain = subDomain,
-                WiserTitle = newCustomerTitle,
-                Database = new ConnectionInformationModel
-                {
-                    Host = currentCustomer.Database.Host,
-                    Password = currentCustomer.Database.Password,
-                    Username = currentCustomer.Database.Username,
-                    DatabaseName = databaseName
-                }
-            };
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but it either had invalid settings, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                return;
+            }
             
+            var branchDatabase = settings.DatabaseName;
+            if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but a database with name '{branchDatabase}' already exists. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                return;
+            }
+
             try
             {
-                await wiserDatabaseConnection.BeginTransactionAsync();
-                await clientDatabaseConnection.BeginTransactionAsync();
-
-                await wiserCustomersService.CreateOrUpdateCustomerAsync(newCustomer);
+                await databaseConnection.BeginTransactionAsync();
+                
+                // Some variables we'll need a lot, for easier access.
+                var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
+                var originalDatabase = connectionStringBuilder.Database;
+                connectionStringBuilder.Database = branchDatabase;
 
                 // Create the database in the same server/cluster.
-                await databaseHelpersService.CreateDatabaseAsync(databaseName);
+                await databaseHelpersService.CreateDatabaseAsync(branchDatabase);
 
                 // Create tables in new database.
                 var query = @"SELECT TABLE_NAME 
-                            FROM INFORMATION_SCHEMA.TABLES
-                            WHERE TABLE_SCHEMA = ?currentSchema
-                            AND TABLE_TYPE = 'BASE TABLE'
-                            AND TABLE_NAME NOT LIKE '\_%'";
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = ?currentSchema
+AND TABLE_TYPE = 'BASE TABLE'
+AND TABLE_NAME NOT LIKE '\_%'
+ORDER BY TABLE_NAME ASC";
 
-                clientDatabaseConnection.AddParameter("currentSchema", currentCustomer.Database.DatabaseName);
-                clientDatabaseConnection.AddParameter("newSchema", newCustomer.Database.DatabaseName);
-                var dataTable = await clientDatabaseConnection.GetAsync(query);
+                databaseConnection.AddParameter("currentSchema", branchDatabase);
+                databaseConnection.AddParameter("newSchema", branchDatabase);
+                var dataTable = await databaseConnection.GetAsync(query);
                 var tablesToAlwaysLeaveEmpty = new List<string>
                 {
                     WiserTableNames.WiserHistory, 
@@ -138,7 +148,7 @@ ORDER BY start_on ASC, id ASC");
                 };
                 
                 // Create the tables in a new connection, because these cause implicit commits.
-                await using (var mysqlConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(newCustomer)))
+                await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
                 {
                     await mysqlConnection.OpenAsync();
                     await using (var command = mysqlConnection.CreateCommand())
@@ -147,14 +157,13 @@ ORDER BY start_on ASC, id ASC");
                         {
                             var tableName = dataRow.Field<string>("TABLE_NAME");
 
-                            command.CommandText = $"CREATE TABLE `{newCustomer.Database.DatabaseName.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}` LIKE `{currentCustomer.Database.DatabaseName.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}`";
+                            command.CommandText = $"CREATE TABLE `{branchDatabase.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}` LIKE `{originalDatabase.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}`";
                             await command.ExecuteNonQueryAsync();
                         }
                     }
                 }
 
                 // Fill the tables with data.
-                var entityTypesString = String.Join(",", entityTypesToSkipWhenSynchronisingEnvironments.Select(x => $"'{x}'"));
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
@@ -162,27 +171,119 @@ ORDER BY start_on ASC, id ASC");
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
                     if (tableName!.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
                     {
-                        await clientDatabaseConnection.ExecuteAsync($@"INSERT INTO `{newCustomer.Database.DatabaseName}`.`{tableName}` 
-                                                                    SELECT * FROM `{currentCustomer.Database.DatabaseName}`.`{tableName}` 
-                                                                    WHERE entity_type NOT IN ('{String.Join("','", entityTypesToSkipWhenSynchronisingEnvironments)}')");
+                        foreach (var entity in settings.Entities)
+                        {
+                            if (String.IsNullOrWhiteSpace(entity.EntityType))
+                            {
+                                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items of entity type to new branch, but it either had invalid settings, or the entity name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                continue;
+                            }
+
+                            // If mode is nothing, skip everything of this entity type.
+                            if (entity.Mode == CreateBranchEntityModes.Nothing)
+                            {
+                                continue;
+                            }
+
+                            var queryBuilder = new StringBuilder();
+                            queryBuilder.AppendLine($@"INSERT INTO `{branchDatabase}`.`{tableName}`
+SELECT * FROM `{originalDatabase}`.`{tableName}`
+WHERE entity_type = '{entity.EntityType.ToMySqlSafeValue(false)}'");
+
+                            var startDateParameter = $"{entity.EntityType}_startOn";
+                            var endDateParameter = $"{entity.EntityType}_endOn";
+
+                            switch (entity.Mode)
+                            {
+                                case CreateBranchEntityModes.Everything:
+                                case CreateBranchEntityModes.Nothing:
+                                    break;
+                                case CreateBranchEntityModes.Random:
+                                    if (entity.AmountOfItems <= 0)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy random X items of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the AmountOfItems setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+
+                                    queryBuilder.AppendLine($"ORDER BY RAND() LIMIT {entity.AmountOfItems}");
+                                    break;
+                                case CreateBranchEntityModes.Recent:
+                                    if (entity.AmountOfItems <= 0)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy recent most X items of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the AmountOfItems setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+                                    
+                                    queryBuilder.AppendLine($"ORDER BY IFNULL(changed_on, added_on) LIMIT {entity.AmountOfItems}");
+                                    break;
+                                case CreateBranchEntityModes.CreatedBefore:
+                                    if (!entity.Start.HasValue || entity.Start.Value == DateTime.MinValue)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the Start date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+                                    
+                                    databaseConnection.AddParameter(startDateParameter, entity.Start);
+                                    queryBuilder.AppendLine($"AND added_on < ?{startDateParameter}");
+                                    break;
+                                case CreateBranchEntityModes.CreatedAfter:
+                                    if (!entity.End.HasValue || entity.End.Value == DateTime.MinValue)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the End date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+                                    
+                                    databaseConnection.AddParameter(endDateParameter, entity.End);
+                                    queryBuilder.AppendLine($"AND added_on > ?{endDateParameter}");
+                                    break;
+                                case CreateBranchEntityModes.CreatedBetween:
+                                    if (!entity.Start.HasValue || entity.Start.Value == DateTime.MinValue)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the Start date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+                                    if (!entity.End.HasValue || entity.End.Value == DateTime.MinValue)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the End date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+                                    
+                                    databaseConnection.AddParameter(endDateParameter, entity.End);
+                                    databaseConnection.AddParameter(startDateParameter, entity.Start);
+                                    
+                                    queryBuilder.AppendLine($"AND added_on BETWEEN ?{startDateParameter} AND ?{endDateParameter}");
+                                    break;
+                                default:
+                                    throw new ArgumentOutOfRangeException(nameof(entity.Mode), entity.Mode.ToString());
+                            }
+
+                            await databaseConnection.ExecuteAsync(queryBuilder.ToString());
+                        }
+                        
                         continue;
                     }
 
                     if (tableName!.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase))
                     {
+                        // We order tables by table name, this means wiser_item always comes before wiser_itemdetail.
+                        // Therefor we can be sure that we already copies the items to the new branch and we can use the IDs of those items to copy the details of those items.
+                        // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemDetail, "");
-                        await clientDatabaseConnection.ExecuteAsync($@"INSERT INTO `{newCustomer.Database.DatabaseName}`.`{tableName}` 
-                                                                    SELECT detail.* FROM `{currentCustomer.Database.DatabaseName}`.`{tableName}` AS detail
-                                                                    JOIN `{currentCustomer.Database.DatabaseName}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id AND item.entity_type NOT IN ({entityTypesString})");
+                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
+                                                                    SELECT detail.* FROM `{originalDatabase}`.`{tableName}` AS detail
+                                                                    JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id");
                         continue;
                     }
 
                     if (tableName!.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase))
                     {
+                        // We order tables by table name, this means wiser_item always comes before wiser_itemfile.
+                        // Therefor we can be sure that we already copies the items to the new branch and we can use the IDs of those items to copy the details of those items.
+                        // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
-                        await clientDatabaseConnection.ExecuteAsync($@"INSERT INTO `{newCustomer.Database.DatabaseName}`.`{tableName}` 
-                                                                    SELECT file.* FROM `{currentCustomer.Database.DatabaseName}`.`{tableName}` AS file
-                                                                    JOIN `{currentCustomer.Database.DatabaseName}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id AND item.entity_type NOT IN ({entityTypesString})");
+                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
+                                                                    SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                    JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
                         continue;
                     }
 
@@ -195,7 +296,7 @@ ORDER BY start_on ASC, id ASC");
                         continue;
                     }
 
-                    await clientDatabaseConnection.ExecuteAsync($"INSERT INTO `{newCustomer.Database.DatabaseName}`.`{tableName}` SELECT * FROM `{currentCustomer.Database.DatabaseName}`.`{tableName}`");
+                    await databaseConnection.ExecuteAsync($"INSERT INTO `{branchDatabase}`.`{tableName}` SELECT * FROM `{originalDatabase}`.`{tableName}`");
                 }
                 
                 // Add triggers (and stored procedures) to database, after inserting all data, so that the wiser_history table will still be empty.
@@ -210,60 +311,67 @@ ORDER BY start_on ASC, id ASC");
                         FROM information_schema.TRIGGERS
                         WHERE TRIGGER_SCHEMA = ?currentSchema
                         AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
-                dataTable = await clientDatabaseConnection.GetAsync(query);
+                dataTable = await databaseConnection.GetAsync(query);
                 
-                var createdStoredProceduresQuery = await ResourceHelpers.ReadTextResourceFromAssemblyAsync("Api.Core.Queries.WiserInstallation.StoredProcedures.sql");
-                await using (var mysqlConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(newCustomer)))
+                await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
                 {
                     await mysqlConnection.OpenAsync();
                     await using (var command = mysqlConnection.CreateCommand())
                     {
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
-                            query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{newCustomer.Database.DatabaseName.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
+                            query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
                             
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
-
-                        command.CommandText = createdStoredProceduresQuery;
-                        await command.ExecuteNonQueryAsync();
                     }
                 }
 
-                // Remove passwords from response.
-                newCustomer.Database.Password = null;
-
-                await clientDatabaseConnection.CommitTransactionAsync();
-                await wiserDatabaseConnection.CommitTransactionAsync();
-
-                return new ServiceResult<CustomerModel>(newCustomer);
+                await databaseConnection.CommitTransactionAsync();
             }
             catch
             {
-                await wiserDatabaseConnection.RollbackTransactionAsync();
-                await clientDatabaseConnection.RollbackTransactionAsync();
+                await databaseConnection.RollbackTransactionAsync();
 
                 // Drop the new database it something went wrong, so that we can start over again later.
                 // We can safely do this, because this method will return an error if the database already exists,
                 // so we can be sure that this database was created here and we can drop it again it something went wrong.
-                if (await databaseHelpersService.DatabaseExistsAsync(databaseName))
+                if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
                 {
-                    await databaseHelpersService.DropDatabaseAsync(databaseName);
+                    await databaseHelpersService.DropDatabaseAsync(branchDatabase);
                 }
 
                 throw;
             }
         }
 
-        private async Task HandleMergeBranchActionAsync(DataRow dataRowWithSettings, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+        private async Task<JObject> HandleMergeBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService)
         {
-            var result = new JObject(new JProperty("SuccessfulChanges", 0), new JProperty("Errors", new JArray()));
+            var successfulChanges = 0;
+            var errors = new JArray();
+            var result = new JObject
+            {
+                {"SuccessfulChanges", 0},
+                {"Errors", errors}
+            };
+            
+            var queueId = dataRowWithSettings.Field<int>("dataRowWithSettings");
+            var settings = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
+            if (settings is not {Id: > 0} || String.IsNullOrWhiteSpace(settings.DatabaseName))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                errors.Add($"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
+                return result;
+            }
 
-            var selectedEnvironmentCustomer = (await wiserCustomersService.GetSingleAsync(settings.Id, true)).ModelObject;
-            var productionCustomer = (await wiserCustomersService.GetSingleAsync(currentCustomer.CustomerId, true)).ModelObject;
-            var productionConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(productionCustomer));
-            var branchConnection = new MySqlConnection(wiserCustomersService.GenerateConnectionStringFromCustomer(selectedEnvironmentCustomer));
+            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
+            var originalDatabase = connectionStringBuilder.Database;
+            var branchDatabase = settings.DatabaseName;
+            connectionStringBuilder.Database = branchDatabase;
+
+            var productionConnection = new MySqlConnection(connectionString);
+            var branchConnection = new MySqlConnection(connectionStringBuilder.ConnectionString);
             await productionConnection.OpenAsync();
             await branchConnection.OpenAsync();
             var productionTransaction = await productionConnection.BeginTransactionAsync();
@@ -274,7 +382,7 @@ ORDER BY start_on ASC, id ASC");
             {
                 // Create the wiser_id_mappings table, in the selected branch, if it doesn't exist yet.
                 // We need it to map IDs of the selected environment to IDs of the production environment, because they are not always the same.
-                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings}, selectedEnvironmentCustomer.Database.DatabaseName);
+                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings}, branchDatabase);
                 
                 // Get all history since last synchronisation.
                 var dataTable = new DataTable();
@@ -287,15 +395,10 @@ ORDER BY start_on ASC, id ASC");
 
                 // Srt saveHistory and username parameters for all queries.
                 var queryPrefix = @"SET @saveHistory = TRUE; SET @_username = ?username; ";
-                var username = $"{IdentityHelpers.GetUserName(identity, true)} (Sync from {selectedEnvironmentCustomer.Name})";
+                var username = $"{dataRowWithSettings.Field<string>("added_by")} (Sync from {originalDatabase})";
                 if (username.Length > 50)
                 {
-                    username = $"{IdentityHelpers.GetUserName(identity)} (Sync from {selectedEnvironmentCustomer.Name})";
-
-                    if (username.Length > 50)
-                    {
-                        username = IdentityHelpers.GetUserName(identity);
-                    }
+                    username = dataRowWithSettings.Field<string>("added_by");
                 }
 
                 sqlParameters.Add("username", username);
@@ -318,7 +421,7 @@ ORDER BY start_on ASC, id ASC");
 
                     // If we have a table that has an ID from wiser_item, then always lock wiser_item as well, because we will read from it later.
                     var originalItemId = Convert.ToUInt64(dataRow["item_id"]);
-                    var (tablePrefix, isWiserItemChange) = GetTablePrefix(tableName, originalItemId);
+                    var (tablePrefix, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
                     var wiserItemTableName = $"{tablePrefix}{WiserTableNames.WiserItem}";
                     if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName))
                     {
@@ -461,7 +564,7 @@ ORDER BY start_on ASC, id ASC");
                                         if (linkDataTable.Rows.Count == 0)
                                         {
                                             // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
-                                            logger.LogWarning($"Could not find link with id '{itemId}' in database '{selectedEnvironmentCustomer.Database.DatabaseName}'. Skipping this history record in synchronisation to production.");
+                                            logger.LogWarning($"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.");
                                             continue;
                                         }
                                     }
@@ -565,7 +668,7 @@ LIMIT 1";
                         {
                             if (action == "ADD_LINK")
                             {
-                                var linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection);
+                                var linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection, wiserItemsService);
                                 if (linkData.HasValue)
                                 {
                                     entityType = linkData.Value.SourceType;
@@ -575,7 +678,7 @@ LIMIT 1";
                             else
                             {
                                 // Check if this item is saved in a dedicated table with a certain prefix.
-                                var (tablePrefix, wiserItemChange) = GetTablePrefix(tableName, originalItemId);
+                                var (tablePrefix, wiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
                                 isWiserItemChange = wiserItemChange;
 
                                 if (isWiserItemChange && originalItemId > 0)
@@ -594,8 +697,7 @@ LIMIT 1";
                                         await environmentAdapter.FillAsync(itemDataTable);
                                         if (itemDataTable.Rows.Count == 0)
                                         {
-                                            logger.LogWarning($"Could not find item with ID '{originalItemId}', so skipping it...");
-                                            result.Errors.Add($"Item met ID '{originalItemId}' kon niet gevonden worden.");
+                                            await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                             continue;
                                         }
                                     }
@@ -606,8 +708,21 @@ LIMIT 1";
                             }
                         }
 
-                        // We don't want to synchronise certain entity types, such as users, relations and baskets.
-                        if (isWiserItemChange && entityTypesToSkipWhenSynchronisingEnvironments.Any(x => String.Equals(x, entityType, StringComparison.OrdinalIgnoreCase)))
+                        var entityTypeMergeSettings = settings.Entities.SingleOrDefault(e => String.Equals(e.Type, entityType, StringComparison.OrdinalIgnoreCase)) ?? new EntityMergeSettingsModel();
+                        var entityMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Entity);
+                        var entityPropertyMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EntityProperty);
+                        var linkMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Link);
+                        var moduleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Module);
+                        var permissionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Permission);
+                        var queryMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Query);
+                        var roleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Role);
+                        var apiConnectionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.ApiConnection);
+                        var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
+                        var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
+                        var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
+
+                        // Only synchronise entities that the user indicated they wanted to synchronise.
+                        if (isWiserItemChange)
                         {
                             continue;
                         }
@@ -617,6 +732,12 @@ LIMIT 1";
                         {
                             case "CREATE_ITEM":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Create)
+                                {
+                                    continue;
+                                }
+
                                 var newItemId = await GenerateNewId(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newItemId;
                                 
@@ -633,6 +754,12 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                             }
                             case "UPDATE_ITEM" when tableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["key"] = field;
                                 sqlParameters["languageCode"] = languageCode;
@@ -667,6 +794,12 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                             }
                             case "UPDATE_ITEM" when tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase):
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["newValue"] = newValue;
                                 
@@ -682,6 +815,12 @@ WHERE id = ?itemId";
                             }
                             case "DELETE_ITEM":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Delete)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["entityType"] = entityType;
                                 
@@ -694,10 +833,22 @@ WHERE id = ?itemId";
                             }
                             case "UNDELETE_ITEM":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Delete)
+                                {
+                                    continue;
+                                }
+
                                 throw new NotImplementedException("Undelete items not supported yet.");
                             }
                             case "ADD_LINK":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["originalItemId"] = originalItemId;
                                 sqlParameters["ordering"] = linkOrdering;
@@ -715,8 +866,8 @@ WHERE id = ?itemId";
                                     await environmentAdapter.FillAsync(getLinkIdDataTable);
                                     if (getLinkIdDataTable.Rows.Count == 0)
                                     {
-                                        logger.LogWarning($"Could not find link ID with itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType}");
-                                        result.Errors.Add($"Kan koppeling-ID met itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType} niet vinden");
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link ID with itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        errors.Add($"Kan koppeling-ID met itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType} niet vinden");
                                         continue;
                                     }
 
@@ -739,6 +890,12 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                             }
                             case "CHANGE_LINK":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["oldItemId"] = oldItemId;
                                 sqlParameters["oldDestinationItemId"] = oldDestinationItemId;
                                 sqlParameters["newValue"] = newValue;
@@ -757,6 +914,12 @@ AND type = ?type";
                             }
                             case "REMOVE_LINK":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["oldItemId"] = oldItemId;
                                 sqlParameters["oldDestinationItemId"] =  oldDestinationItemId;
                                 sqlParameters["type"] = linkType.Value;
@@ -773,6 +936,12 @@ AND type = ?type";
                             }
                             case "UPDATE_ITEMLINKDETAIL":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["linkId"] = linkId;
                                 sqlParameters["key"] = field;
                                 sqlParameters["languageCode"] = languageCode;
@@ -806,6 +975,12 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                             }
                             case "ADD_FILE":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
                                 var newFileId = await GenerateNewId(tableName, productionConnection, branchConnection);
                                 sqlParameters["fileItemId"] = newValue;
@@ -825,6 +1000,12 @@ VALUES (?newId, ?fileItemId)";
                             }
                             case "UPDATE_FILE":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["fileId"] = fileId;
                                 sqlParameters["originalFileId"] = originalFileId;
 
@@ -871,6 +1052,12 @@ WHERE id = ?fileId";
                             }
                             case "DELETE_FILE":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    continue;
+                                }
+
                                 sqlParameters["itemId"] = newValue;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -893,6 +1080,31 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                             case "INSERT_LINK_SETTING":
                             case "INSERT_API_CONNECTION":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                switch (tableName)
+                                {
+                                    case WiserTableNames.WiserEntity when entityMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserQuery when queryMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserModule when moduleMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserPermission when permissionMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserLink when linkMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Create: true}:
+                                        continue;
+                                }
+
                                 var newEntityId = await GenerateNewId(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newEntityId;
                                 
@@ -930,6 +1142,31 @@ VALUES (?newId)";
                             case "UPDATE_LINK_SETTING":
                             case "UPDATE_API_CONNECTION":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                switch (tableName)
+                                {
+                                    case WiserTableNames.WiserEntity when entityMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserQuery when queryMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserModule when moduleMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserPermission when permissionMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserLink when linkMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Update: true}:
+                                        continue;
+                                }
+                                
                                 sqlParameters["id"] = objectId;
                                 sqlParameters["newValue"] = newValue;
 
@@ -954,6 +1191,31 @@ WHERE id = ?id";
                             case "DELETE_LINK_SETTING":
                             case "DELETE_API_CONNECTION":
                             {
+                                // Check if the user requested this change to be synchronised.
+                                switch (tableName)
+                                {
+                                    case WiserTableNames.WiserEntity when entityMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserQuery when queryMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserModule when moduleMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserPermission when permissionMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserLink when linkMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Delete: true}:
+                                        continue;
+                                }
+                                
                                 sqlParameters["id"] = objectId;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -969,13 +1231,13 @@ WHERE `id` = ?id";
                                 throw new ArgumentOutOfRangeException(nameof(action), action, $"Unsupported action for history synchronisation: '{action}'");
                         }
 
-                        result.SuccessfulChanges++;
+                        successfulChanges++;
                         historyItemsSynchronised.Add(historyId);
                     }
                     catch (Exception exception)
                     {
-                        logger.LogError(exception, $"An error occurred while trying to synchronise history ID '{historyId}' from '{selectedEnvironmentCustomer.Database.DatabaseName}' to '{productionCustomer.Database.DatabaseName}'");
-                        result.Errors.Add($"Het is niet gelukt om de wijziging '{action}' voor item '{originalItemId}' over te zetten. De fout was: {exception.Message}");
+                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to synchronise history ID '{historyId}' from '{branchDatabase}' to '{originalDatabase}'", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                        errors.Add($"Het is niet gelukt om de wijziging '{action}' voor item '{originalItemId}' over te zetten. De fout was: {exception.Message}");
                     }
                 }
 
@@ -989,17 +1251,19 @@ WHERE `id` = ?id";
                         await environmentCommand.ExecuteNonQueryAsync();
                     }
 
-                    await EqualizeMappedIds(branchConnection);
+                    await EqualizeMappedIds(branchConnection, wiserItemsService);
                 }
                 catch (Exception exception)
                 {
-                    logger.LogError(exception, $"An error occurred while trying to clean up after synchronising from '{selectedEnvironmentCustomer.Database.DatabaseName}' to '{productionCustomer.Database.DatabaseName}'");
-                    result.Errors.Add($"Er is iets fout gegaan tijdens het opruimen na de synchronisatie. Het wordt aangeraden om deze omgeving niet meer te gebruiken voor synchroniseren naar productie, anders kunnen dingen dubbel gescynchroniseerd worden. U kunt wel een nieuwe omgeving maken en vanuit daar weer verder werken. De fout was: {exception.Message}");
+                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to clean up after synchronising from '{branchDatabase}' to '{originalDatabase}'", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                    errors.Add($"Er is iets fout gegaan tijdens het opruimen na de synchronisatie. Het wordt aangeraden om deze omgeving niet meer te gebruiken voor synchroniseren naar productie, anders kunnen dingen dubbel gescynchroniseerd worden. U kunt wel een nieuwe omgeving maken en vanuit daar weer verder werken. De fout was: {exception.Message}");
                 }
 
                 // Always commit, so we keep our progress.
                 await branchTransaction.CommitAsync();
                 await productionTransaction.CommitAsync();
+
+                result["SuccessfulChanges"] = successfulChanges;
             }
             finally
             {
@@ -1026,8 +1290,317 @@ WHERE `id` = ?id";
                 await branchConnection.DisposeAsync();
                 await productionConnection.DisposeAsync();
             }
+            
+            return result;
+        }
 
-            //return new ServiceResult<SynchroniseChangesToProductionResultModel>(result);
+        /// <summary>
+        /// Add all parameters from a dictionary to a <see cref="MySqlCommand"/>.
+        /// </summary>
+        /// <param name="parameters">The dictionary with the parameters.</param>
+        /// <param name="command">The database command.</param>
+        private static void AddParametersToCommand(Dictionary<string, object> parameters, MySqlCommand command)
+        {
+            command.Parameters.Clear();
+            foreach (var parameter in parameters)
+            {
+                command.Parameters.AddWithValue(parameter.Key, parameter.Value);
+            }
+        }
+
+        /// <summary>
+        /// Get the ID of an item from the mappings. The returned ID will be the ID of the same item in the production environment.
+        /// If there is no mapping for this ID, it means the ID is the same in both environments and the input will be returned.
+        /// </summary>
+        /// <param name="tableName">The table that the ID belongs to.</param>
+        /// <param name="idMapping">The dictionary that contains all the ID mappings.</param>
+        /// <param name="id">The ID to get the mapped value of.</param>
+        /// <returns>The ID of the same item in the production environment.</returns>
+        private static ulong? GetMappedId(string tableName, IReadOnlyDictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id)
+        {
+            if (id is null or 0)
+            {
+                return id;
+            }
+
+            if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase) && idMapping.ContainsKey(tableName) && idMapping[tableName].ContainsKey(id.Value))
+            {
+                id = idMapping[tableName][id.Value];
+            }
+            else
+            {
+                id = idMapping.FirstOrDefault(x => x.Value.ContainsKey(id.Value)).Value?[id.Value] ?? id;
+            }
+
+            return id;
+        }
+
+        /// <summary>
+        /// Get the entity types and table prefixes for both items in a link.
+        /// </summary>
+        /// <param name="sourceId">The ID of the source item.</param>
+        /// <param name="destinationId">The ID of the destination item.</param>
+        /// <param name="linkType">The link type number.</param>
+        /// <param name="mySqlConnection">The connection to the database.</param>
+        /// <param name="wiserItemsService"></param>
+        /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
+        private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService)
+        {
+            var allLinkTypeSettings = (await wiserItemsService.GetAllLinkTypeSettingsAsync()).Where(l => l.Type == linkType);
+            await using var command = mySqlConnection.CreateCommand();
+            command.Parameters.AddWithValue("sourceId", sourceId);
+            command.Parameters.AddWithValue("destinationId", destinationId);
+            
+            // It's possible that there are multiple link types that use the same number, so we have to check all of them.
+            foreach (var linkTypeSettings in allLinkTypeSettings)
+            {
+                var sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.SourceEntityType);
+                var destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.DestinationEntityType);
+
+                // Check if the source item exists in this table.
+                command.CommandText = $@"SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
+UNION ALL
+SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
+LIMIT 1";
+                var sourceDataTable = new DataTable();
+                using var sourceAdapter = new MySqlDataAdapter(command);
+                await sourceAdapter.FillAsync(sourceDataTable);
+                if (sourceDataTable.Rows.Count == 0 || !String.Equals(sourceDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.SourceEntityType))
+                {
+                    continue;
+                }
+
+                // Check if the destination item exists in this table.
+                command.CommandText = $@"SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
+UNION ALL
+SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
+LIMIT 1";
+                var destinationDataTable = new DataTable();
+                using var destinationAdapter = new MySqlDataAdapter(command);
+                await destinationAdapter.FillAsync(destinationDataTable);
+                if (destinationDataTable.Rows.Count == 0 || !String.Equals(destinationDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.DestinationEntityType))
+                {
+                    continue;
+                }
+                
+                // If we reached this point, it means we found the correct link type and entity types.
+                return (linkTypeSettings.SourceEntityType, sourceTablePrefix, linkTypeSettings.DestinationEntityType, destinationTablePrefix);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Generates a new ID for the specified table. This will get the highest number from both databases and add 1 to that number.
+        /// This is to make sure that the new ID will not exist anywhere yet, to prevent later synchronisation problems.
+        /// </summary>
+        /// <param name="tableName">The name of the table.</param>
+        /// <param name="productionConnection">The connection to the production database.</param>
+        /// <param name="environmentConnection">The connection to the environment database.</param>
+        /// <returns>The new ID that should be used for the first new item to be inserted into this table.</returns>
+        private async Task<ulong> GenerateNewId(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
+        {
+            await using var productionCommand = productionConnection.CreateCommand();
+            await using var environmentCommand = environmentConnection.CreateCommand();
+            
+            productionCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
+            environmentCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
+
+            var maxProductionId = 0UL;
+            var maxEnvironmentId = 0UL;
+            
+            await using var productionReader = await productionCommand.ExecuteReaderAsync();
+            if (await productionReader.ReadAsync())
+            {
+                maxProductionId = Convert.ToUInt64(productionReader.GetValue(0));
+            }
+            await using var environmentReader = await environmentCommand.ExecuteReaderAsync();
+            if (await environmentReader.ReadAsync())
+            {
+                maxEnvironmentId = Convert.ToUInt64(environmentReader.GetValue(0));
+            }
+
+
+            return Math.Max(maxProductionId, maxEnvironmentId) + 1;
+        }
+
+        /// <summary>
+        /// Add an ID mapping, to map the ID of the environment database to the same item with a different ID in the production database.
+        /// </summary>
+        /// <param name="idMappings">The dictionary that contains the in-memory mappings.</param>
+        /// <param name="tableName">The table that the ID belongs to.</param>
+        /// <param name="originalItemId">The ID of the item in the selected environment.</param>
+        /// <param name="newItemId">The ID of the item in the production environment.</param>
+        /// <param name="environmentConnection">The database connection to the selected environment.</param>
+        private async Task AddIdMapping(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection)
+        {
+            if (!idMappings.ContainsKey(tableName))
+            {
+                idMappings.Add(tableName, new Dictionary<ulong, ulong>());
+            }
+
+            idMappings[tableName].Add(originalItemId, newItemId);
+            await using var environmentCommand = environmentConnection.CreateCommand();
+            environmentCommand.CommandText = $@"INSERT INTO `{WiserTableNames.WiserIdMappings}` 
+(table_name, our_id, production_id)
+VALUES (?tableName, ?ourId, ?productionId)";
+            
+            environmentCommand.Parameters.AddWithValue("tableName", tableName);
+            environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
+            environmentCommand.Parameters.AddWithValue("productionId", newItemId);
+            await environmentCommand.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>
+        /// This will update IDs of items/files/etc in the selected environment so that they all will have the same ID as in the production environment.
+        /// </summary>
+        /// <param name="environmentConnection">The database connection to the selected environment.</param>
+        /// <param name="wiserItemsService"></param>
+        private async Task EqualizeMappedIds(MySqlConnection environmentConnection, IWiserItemsService wiserItemsService)
+        {
+            await using var command = environmentConnection.CreateCommand();
+            command.CommandText = $@"SELECT * FROM `{WiserTableNames.WiserIdMappings}` ORDER BY id DESC";
+            var dataTable = new DataTable();
+            using var adapter = new MySqlDataAdapter(command);
+            await adapter.FillAsync(dataTable);
+            
+            foreach (DataRow dataRow in dataTable.Rows)
+            {
+                var mappingRowId = dataRow.Field<ulong>("id");
+                var tableName = dataRow.Field<string>("table_name") ?? "";
+                var ourId = dataRow.Field<ulong>("our_id");
+                var productionId = dataRow.Field<ulong>("production_id");
+                
+                command.Parameters.AddWithValue("mappingRowId", mappingRowId);
+                command.Parameters.AddWithValue("ourId", ourId);
+                command.Parameters.AddWithValue("productionId", productionId);
+                
+                if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
+                {
+                    command.CommandText = $@"SELECT entity_type FROM `{tableName}` WHERE id = ?ourId";
+                    var entityTypeDataTable = new DataTable();
+                    await adapter.FillAsync(entityTypeDataTable);
+                    var entityType = entityTypeDataTable.Rows[0].Field<string>("entity_type");
+                    var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
+                    var LinkTypesWithSource = allLinkTypeSettings.Where(l => String.Equals(l.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var LinkTypesWithDestination = allLinkTypeSettings.Where(l => String.Equals(l.DestinationEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
+                    
+                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItem, "");
+                    command.CommandText = $@"SET @saveHistory = FALSE;
+
+-- Update the ID of the item itself.
+UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
+SET id = ?productionId
+WHERE id = ?ourId;
+
+-- Update all original IDs of items that are using this ID.
+UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
+SET original_item_id = ?productionId
+WHERE original_item_id = ?ourId;
+
+-- Update all parent IDs of items that are using this ID.
+UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
+SET parent_item_id = ?productionId
+WHERE parent_item_id = ?ourId;
+
+-- Update item details to use the new ID.
+UPDATE `{tablePrefix}{WiserTableNames.WiserItemDetail}`
+SET item_id = ?productionId
+WHERE item_id = ?ourId;
+
+-- Update item files to use the new ID.
+UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}`
+SET item_id = ?productionId
+WHERE item_id = ?ourId;";
+
+                    // We need to check if there are any dedicated wiser_itemlink tables such as 123_wiser_itemlink and update the ID of the item in there.
+                    // If there are no dedicated tables, just update it in the main wiser_itemlink table.
+                    // This first block for links where the source item is the current item.
+                    if (!LinkTypesWithSource.Any())
+                    {
+                        command.CommandText += $@"
+-- Update item links to use the new ID.
+UPDATE `{WiserTableNames.WiserItemLink}`
+SET item_id = ?productionId
+WHERE item_id = ?ourId;";
+                    }
+                    else
+                    {
+                        foreach (var linkTypeSetting in LinkTypesWithSource)
+                        {
+                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
+                            command.CommandText += $@"
+-- Update item links to use the new ID.
+UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
+SET item_id = ?productionId
+WHERE item_id = ?ourId;";
+                        }
+                    }
+
+                    // This second block is for links where the destination is the current item.
+                    if (!LinkTypesWithDestination.Any())
+                    {
+                        command.CommandText += $@"
+-- Update item links to use the new ID.
+UPDATE `{WiserTableNames.WiserItemLink}`
+SET destination_item_id = ?productionId
+WHERE destination_item_id = ?ourId;";
+                    }
+                    else
+                    {
+                        foreach (var linkTypeSetting in LinkTypesWithDestination)
+                        {
+                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
+                            command.CommandText += $@"
+-- Update item links to use the new ID.
+UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
+SET destination_item_id = ?productionId
+WHERE destination_item_id = ?ourId;";
+                        }
+                    }
+
+                    await command.ExecuteNonQueryAsync();
+                }
+                else if (tableName.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase) || tableName.EndsWith(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
+                {
+                    command.CommandText = $@"SET @saveHistory = FALSE;
+UPDATE `{tableName.ToMySqlSafeValue(false)}` 
+SET id = ?productionId 
+WHERE id = ?ourId;";
+                    await command.ExecuteNonQueryAsync();
+                }
+                else if (tableName.EndsWith(WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase))
+                {
+                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLink, "");
+                    command.CommandText = $@"SET @saveHistory = FALSE;
+
+UPDATE `{tablePrefix}{WiserTableNames.WiserItemLink}` 
+SET id = ?productionId 
+WHERE id = ?ourId;
+
+UPDATE `{tablePrefix}{WiserTableNames.WiserItemLinkDetail}` 
+SET link_id = ?productionId 
+WHERE link_id = ?ourId;
+
+UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}` 
+SET itemlink_id = ?productionId 
+WHERE itemlink_id = ?ourId;";
+                    await command.ExecuteNonQueryAsync();
+                }
+                else
+                {
+                    command.CommandText = $@"SET @saveHistory = FALSE;
+
+UPDATE `{tableName}` 
+SET id = ?productionId 
+WHERE id = ?ourId;";
+                    await command.ExecuteNonQueryAsync();
+                }
+                
+                // Delete the row when we succeeded in updating the ID.
+                command.CommandText = $"DELETE FROM `{WiserTableNames.WiserIdMappings}` WHERE id = ?mappingRowId";
+                await command.ExecuteNonQueryAsync();
+            }
         }
     }
 }
