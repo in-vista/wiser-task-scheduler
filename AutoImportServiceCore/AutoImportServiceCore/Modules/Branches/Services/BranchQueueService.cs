@@ -158,7 +158,7 @@ AND TABLE_TYPE = 'BASE TABLE'
 AND TABLE_NAME NOT LIKE '\_%'
 ORDER BY TABLE_NAME ASC";
 
-                databaseConnection.AddParameter("currentSchema", branchDatabase);
+                databaseConnection.AddParameter("currentSchema", originalDatabase);
                 databaseConnection.AddParameter("newSchema", branchDatabase);
                 var dataTable = await databaseConnection.GetAsync(query);
                 var tablesToAlwaysLeaveEmpty = new List<string>
@@ -304,12 +304,17 @@ WHERE entity_type = '{entity.EntityType.ToMySqlSafeValue(false)}'");
                     if (tableName!.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase))
                     {
                         // We order tables by table name, this means wiser_item always comes before wiser_itemfile.
-                        // Therefor we can be sure that we already copies the items to the new branch and we can use the IDs of those items to copy the details of those items.
+                        // Therefor we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
-                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
-                                                                    SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-                                                                    JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+
+                        if (await databaseHelpersService.TableExistsAsync($"{prefix}{WiserTableNames.WiserItem}"))
+                        {
+                            await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
+SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+                        }
+
                         continue;
                     }
 
@@ -328,15 +333,15 @@ WHERE entity_type = '{entity.EntityType.ToMySqlSafeValue(false)}'");
                 // Add triggers (and stored procedures) to database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new environment.
                 query = $@"SELECT 
-                            TRIGGER_NAME,
-                            EVENT_MANIPULATION,
-                            EVENT_OBJECT_TABLE,
-	                        ACTION_STATEMENT,
-	                        ACTION_ORIENTATION,
-	                        ACTION_TIMING
-                        FROM information_schema.TRIGGERS
-                        WHERE TRIGGER_SCHEMA = ?currentSchema
-                        AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
+    TRIGGER_NAME,
+    EVENT_MANIPULATION,
+    EVENT_OBJECT_TABLE,
+	ACTION_STATEMENT,
+	ACTION_ORIENTATION,
+	ACTION_TIMING
+FROM information_schema.TRIGGERS
+WHERE TRIGGER_SCHEMA = ?currentSchema
+AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                 dataTable = await databaseConnection.GetAsync(query);
                 
                 await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
