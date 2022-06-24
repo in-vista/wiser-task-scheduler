@@ -32,9 +32,6 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <summary>
         /// Creates a new instance of <see cref="QueriesService"/>.
         /// </summary>
-        /// <param name="logService">The service to use for logging.</param>
-        /// <param name="logger"></param>
-        /// <param name="databaseConnection"></param>
         public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider)
         {
             this.logService = logService;

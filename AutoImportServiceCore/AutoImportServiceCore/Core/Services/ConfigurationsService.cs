@@ -100,6 +100,11 @@ namespace AutoImportServiceCore.Core.Services
                 }
             }
 
+            if (configuration.BranchQueueModel != null)
+            {
+                allActions.Add(configuration.BranchQueueModel);
+            }
+
             return allActions;
         }
 

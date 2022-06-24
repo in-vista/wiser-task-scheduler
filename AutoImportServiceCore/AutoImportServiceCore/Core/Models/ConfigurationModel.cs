@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Modules.CleanupItems.Models;
+using AutoImportServiceCore.Modules.Branches.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
@@ -78,5 +79,11 @@ namespace AutoImportServiceCore.Core.Models
         [XmlArray("CleanupItems")]
         [XmlArrayItem(typeof(CleanupItemModel))]
         public CleanupItemModel[] CleanupItems { get; set; }
+
+        /// <summary>
+        /// Gets or sets the branch queue models.
+        /// </summary>
+        [XmlElement("BranchQueue")]
+        public BranchQueueModel BranchQueueModel { get; set; }
     }
 }
