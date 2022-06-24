@@ -708,7 +708,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                                         if (linkDataTable.Rows.Count == 0)
                                         {
                                             // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
-                                            logger.LogWarning($"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.");
+                                            await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                             continue;
                                         }
                                     }
@@ -874,7 +874,7 @@ LIMIT 1";
                                     continue;
                                 }
 
-                                var newItemId = await GenerateNewId(tableName, productionConnection, branchConnection);
+                                var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newItemId;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -884,7 +884,7 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMapping(idMapping, tableName, originalItemId, newItemId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalItemId, newItemId, branchConnection);
 
                                 break;
                             }
@@ -1016,7 +1016,7 @@ WHERE id = ?itemId";
                                     }
 
                                     originalLinkId = Convert.ToUInt64(getLinkIdDataTable.Rows[0]["id"]);
-                                    linkId = await GenerateNewId(tableName, productionConnection, branchConnection);
+                                    linkId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 }
 
                                 sqlParameters["newId"] = linkId;
@@ -1028,7 +1028,7 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMapping(idMapping, tableName, originalLinkId.Value, linkId.Value, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalLinkId.Value, linkId.Value, branchConnection);
 
                                 break;
                             }
@@ -1126,7 +1126,7 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 }
 
                                 // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
-                                var newFileId = await GenerateNewId(tableName, productionConnection, branchConnection);
+                                var newFileId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["fileItemId"] = newValue;
                                 sqlParameters["newId"] = newFileId;
 
@@ -1138,7 +1138,7 @@ VALUES (?newId, ?fileItemId)";
                                 await productionCommand.ExecuteReaderAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMapping(idMapping, tableName, originalObjectId, newFileId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection);
 
                                 break;
                             }
@@ -1252,7 +1252,7 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                         continue;
                                 }
 
-                                var newEntityId = await GenerateNewId(tableName, productionConnection, branchConnection);
+                                var newEntityId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newEntityId;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -1274,7 +1274,7 @@ VALUES (?newId)";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMapping(idMapping, tableName, originalObjectId, newEntityId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newEntityId, branchConnection);
 
                                 break;
                             }
@@ -1404,7 +1404,7 @@ WHERE `id` = ?id";
                         await environmentCommand.ExecuteNonQueryAsync();
                     }
 
-                    await EqualizeMappedIds(branchConnection, wiserItemsService, branchQueue, configurationServiceName);
+                    await EqualizeMappedIdsAsync(branchConnection, wiserItemsService, branchQueue, configurationServiceName);
                 }
                 catch (Exception exception)
                 {
@@ -1580,7 +1580,7 @@ LIMIT 1";
         /// <param name="productionConnection">The connection to the production database.</param>
         /// <param name="environmentConnection">The connection to the environment database.</param>
         /// <returns>The new ID that should be used for the first new item to be inserted into this table.</returns>
-        private async Task<ulong> GenerateNewId(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
+        private async Task<ulong> GenerateNewIdAsync(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
         {
             await using var productionCommand = productionConnection.CreateCommand();
             await using var environmentCommand = environmentConnection.CreateCommand();
@@ -1614,7 +1614,7 @@ LIMIT 1";
         /// <param name="originalItemId">The ID of the item in the selected environment.</param>
         /// <param name="newItemId">The ID of the item in the production environment.</param>
         /// <param name="environmentConnection">The database connection to the selected environment.</param>
-        private async Task AddIdMapping(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection)
+        private async Task AddIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection)
         {
             if (!idMappings.ContainsKey(tableName))
             {
@@ -1637,10 +1637,7 @@ VALUES (?tableName, ?ourId, ?productionId)";
         /// This will update IDs of items/files/etc in the selected environment so that they all will have the same ID as in the production environment.
         /// </summary>
         /// <param name="environmentConnection">The database connection to the selected environment.</param>
-        /// <param name="wiserItemsService"></param>
-        /// <param name="branchQueue"></param>
-        /// <param name="configurationServiceName"></param>
-        private async Task EqualizeMappedIds(MySqlConnection environmentConnection, IWiserItemsService wiserItemsService, BranchQueueModel branchQueue, string configurationServiceName)
+        private async Task EqualizeMappedIdsAsync(MySqlConnection environmentConnection, IWiserItemsService wiserItemsService, BranchQueueModel branchQueue, string configurationServiceName)
         {
             await using var command = environmentConnection.CreateCommand();
             command.CommandText = $@"SELECT * FROM `{WiserTableNames.WiserIdMappings}` ORDER BY id DESC";

@@ -7,8 +7,5 @@ namespace AutoImportServiceCore.Modules.Branches.Models
     /// A model for processing the branch queue.
     /// </summary>
     [XmlType("BranchQueue")]
-    public class BranchQueueModel : ActionModel
-    {
-    
-    }
+    public class BranchQueueModel : ActionModel { }
 }
