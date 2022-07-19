@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Modules.CleanupItems.Models;
 using AutoImportServiceCore.Modules.Branches.Models;
+using AutoImportServiceCore.Modules.Communications.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
@@ -116,6 +117,19 @@ namespace AutoImportServiceCore.Core.Models
         /// </summary>
         [XmlElement("CleanupItem")]
         public CleanupItemModel[] CleanupItems { get; set; }
+
+        /// <summary>
+        /// Gets or sets the communications that have been placed in the group.
+        /// </summary>
+        [XmlArray("Communications")]
+        [XmlArrayItem(typeof(CommunicationModel))]
+        public CommunicationModel[] CommunicationGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the communications that have been placed outside the group.
+        /// </summary>
+        [XmlElement("Communication")]
+        public CommunicationModel[] Communications { get; set; }
 
         /// <summary>
         /// Gets or sets the branch queue models.

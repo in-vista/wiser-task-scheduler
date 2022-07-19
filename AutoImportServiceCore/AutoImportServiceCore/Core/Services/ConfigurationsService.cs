@@ -88,7 +88,9 @@ namespace AutoImportServiceCore.Core.Services
                 configuration.ImportFileGroup,
                 configuration.ImportFiles,
                 configuration.CleanupItemGroup,
-                configuration.CleanupItems
+                configuration.CleanupItems,
+                configuration.CommunicationGroup,
+                configuration.Communications
             };
 
             var allActions = new List<ActionModel>();
