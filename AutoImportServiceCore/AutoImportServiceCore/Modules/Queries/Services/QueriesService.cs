@@ -147,7 +147,14 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             databaseConnection.ClearParameters();
             foreach (var parameter in parameters)
             {
-                databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                if (parameter.Value == null || parameter.Value.Equals("DBNull", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    databaseConnection.AddParameter(parameter.Key, DBNull.Value);
+                }
+                else
+                {
+                    databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                }
             }
 
             var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);
