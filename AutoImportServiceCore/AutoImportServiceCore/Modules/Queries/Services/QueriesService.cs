@@ -54,6 +54,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var query = (QueryModel)action;
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
+            databaseConnection.SetCommandTimeout(query.Timeout);
 
             // Enforce the set character set and collation that is used during the execution of this action.
             databaseConnection.AddParameter("characterSet", query.CharacterEncoding.CharacterSet);

@@ -158,7 +158,8 @@ namespace AutoImportServiceCore.Core.Helpers
 
             try
             {
-                value = (string) ResultSetHelper.GetCorrectObject<JValue>(keySplit[0], rows, usingResultSet);
+                var result = ResultSetHelper.GetCorrectObject<JToken>(keySplit[0], rows, usingResultSet);
+                value = result.GetType() == typeof(JValue) ? (string) result : result.ToString();
             }
             catch (Exception)
             {
