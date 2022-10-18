@@ -22,6 +22,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
+using GeeksCoreLibrary.Modules.Communication.Extensions;
+using GeeksCoreLibrary.Modules.DataSelector.Services;
 
 namespace AutoImportServiceCore.Modules.Communications.Services;
 
@@ -68,7 +70,9 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
         var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
         var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
+        var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
         
+        var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, null, null, null, dataSelectorsServiceLogger, null);
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
         var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
 
@@ -81,6 +85,100 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
             default:
                 throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
         }
+    }
+
+    /// <summary>
+    /// Generate communications that need to be send.
+    /// </summary>
+    /// <param name="communication">The communication information.</param>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="gclCommunicationsService">The communications service from the GCL to store the generated communications.</param>
+    /// <param name="dataSelectorsService">The data selectors service to use.</param>
+    /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
+    private async Task GenerateCommunicationsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, DataSelectorsService dataSelectorsService, string configurationServiceName)
+    {
+	    //TODO call GCL communication service to get all settings.
+	    var communicationSettings = new List<CommunicationSettingsModel>();
+
+	    foreach (var communicationSetting in communicationSettings)
+	    {
+		    var contentSettings = communicationSetting.Settings.SingleOrDefault(x => x.Type == communication.Type);
+		    var lastProcessed = communicationSetting.LastProcessed.SingleOrDefault(x => x.Type == communication.Type);
+		    if (lastProcessed == null)
+		    {
+			    // TODO log error
+			    continue;
+		    }
+		    
+		    switch (communicationSetting.SendTriggerType)
+		    {
+			    case SendTriggerTypes.Direct:
+			    case SendTriggerTypes.Fixed:
+				    if (communicationSetting.TriggerStart > DateTime.Now || lastProcessed.DateTime >= communicationSetting.TriggerStart)
+				    {
+					    continue;
+				    }
+				    break;
+			    case SendTriggerTypes.Recurring:
+				    if (communicationSetting.TriggerStart > DateTime.Now ||
+				        communicationSetting.TriggerEnd < DateTime.Now ||
+				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Week && communicationSetting.TriggerWeekDays.IsToday() ) ||
+				        // TODO day of month
+				        communicationSetting.TriggerTime < DateTime.Now ||
+				        lastProcessed.DateTime >= communicationSetting.TriggerTime)
+				    {
+					    continue;
+				    }
+				    break;
+			    default:
+				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString());
+		    }
+
+		    var receivers = new List<string>();
+
+		    if (communicationSetting.ReceiversQueryId > 0)
+		    {
+			    var query = await dataSelectorsService.GetWiserQueryAsync(communicationSetting.ReceiversQueryId);
+			    var receiversDataTable = await databaseConnection.GetAsync(query);
+
+			    foreach (DataRow receiverRow in receiversDataTable.Rows)
+			    {
+				    // TODO set correct column
+				    receivers.Add(receiverRow.Field<string>(0));
+			    }
+		    }
+		    else if (communicationSetting.ReceiversDataSelectorId > 0)
+		    {
+			    
+		    }
+		    else if (communicationSetting.ReceiversList != null && communicationSetting.ReceiversList.Any())
+		    {
+			    receivers.AddRange(communicationSetting.ReceiversList);
+		    }
+		    
+		    if(!receivers.Any())
+		    {
+			    // TODO error
+			    continue;
+		    }
+
+		    foreach (var receiver in receivers)
+		    {
+			    switch (communication.Type)
+			    {
+				    case CommunicationTypes.Email:
+					    await gclCommunicationsService.SendEmailAsync(receiver, contentSettings.Subject, contentSettings.Content);
+					    break;
+				    case CommunicationTypes.Sms:
+					    await gclCommunicationsService.SendSmsAsync(receiver, contentSettings.Content);
+					    break;
+				    case CommunicationTypes.WhatsApp:
+					    throw new NotImplementedException();
+				    default:
+					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
+			    }
+		    }
+	    }
     }
 
     /// <summary>
