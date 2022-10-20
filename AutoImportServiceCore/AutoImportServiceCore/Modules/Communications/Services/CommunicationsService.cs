@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
 using GeeksCoreLibrary.Modules.Communication.Extensions;
+using GeeksCoreLibrary.Modules.DataSelector.Models;
 using GeeksCoreLibrary.Modules.DataSelector.Services;
 
 namespace AutoImportServiceCore.Modules.Communications.Services;
@@ -74,7 +75,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         
         var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, null, null, null, dataSelectorsServiceLogger, null);
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
+        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
 
         switch (communication.Type)
         {
@@ -97,19 +98,19 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
     private async Task GenerateCommunicationsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, DataSelectorsService dataSelectorsService, string configurationServiceName)
     {
-	    //TODO call GCL communication service to get all settings.
-	    var communicationSettings = new List<CommunicationSettingsModel>();
+	    var communicationSettings = await gclCommunicationsService.GetSettingsAsync(communication.Type);
 
 	    foreach (var communicationSetting in communicationSettings)
 	    {
-		    var contentSettings = communicationSetting.Settings.SingleOrDefault(x => x.Type == communication.Type);
+		    var contentSettings = communicationSetting.Settings.Single(x => x.Type == communication.Type);
 		    var lastProcessed = communicationSetting.LastProcessed.SingleOrDefault(x => x.Type == communication.Type);
 		    if (lastProcessed == null)
 		    {
-			    // TODO log error
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There is no 'LastProcessed' for '{communication.Type}' with ID '{communicationSetting.Id}'. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
 			    continue;
 		    }
 		    
+		    // Check if the communication needs to be generated based on it's type and associated settings.
 		    switch (communicationSetting.SendTriggerType)
 		    {
 			    case SendTriggerTypes.Direct:
@@ -120,12 +121,15 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    }
 				    break;
 			    case SendTriggerTypes.Recurring:
-				    if (communicationSetting.TriggerStart > DateTime.Now ||
-				        communicationSetting.TriggerEnd < DateTime.Now ||
-				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Week && communicationSetting.TriggerWeekDays.IsToday() ) ||
-				        // TODO day of month
-				        communicationSetting.TriggerTime < DateTime.Now ||
-				        lastProcessed.DateTime >= communicationSetting.TriggerTime)
+				    // TODO check if datetime values are not null (HasValue property)
+				    var currentDate = DateTime.Now;
+				    if (communicationSetting.TriggerStart > currentDate ||
+				        communicationSetting.TriggerEnd < currentDate ||
+				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Week && !communicationSetting.TriggerWeekDays.IsToday() ) ||
+				        // If trigger is based on month fit the given day within the number of days in the month, e.g. if the trigger is set on the 31th and the month only has 30 days it will be executed on the 30th.
+				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Month && Math.Min(DateTime.DaysInMonth(currentDate.Year, currentDate.Month), communicationSetting.TriggerDayOfMonth) != currentDate.Day) ||
+				        communicationSetting.TriggerTime.Value.TimeOfDay < currentDate.TimeOfDay ||
+				        lastProcessed.DateTime.TimeOfDay >= communicationSetting.TriggerTime.Value.TimeOfDay)
 				    {
 					    continue;
 				    }
@@ -134,43 +138,62 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString());
 		    }
 
-		    var receivers = new List<string>();
+		    var receivers = new Dictionary<string, JToken>();
 
-		    if (communicationSetting.ReceiversQueryId > 0)
+		    // Retrieve all receivers based on settings.
+		    if (communicationSetting.ReceiversQueryId > 0 || communicationSetting.ReceiversDataSelectorId > 0)
 		    {
-			    var query = await dataSelectorsService.GetWiserQueryAsync(communicationSetting.ReceiversQueryId);
-			    var receiversDataTable = await databaseConnection.GetAsync(query);
-
-			    foreach (DataRow receiverRow in receiversDataTable.Rows)
+			    if (String.IsNullOrWhiteSpace(contentSettings.Selector))
 			    {
-				    // TODO set correct column
-				    receivers.Add(receiverRow.Field<string>(0));
+				    // TODO: Throw/log error or something.
+				    continue;
+			    }
+
+			    var dataSelectorSettings = new DataSelectorRequestModel
+			    {
+				    DataSelectorId = communicationSetting.ReceiversDataSelectorId,
+				    QueryId = communicationSetting.ReceiversQueryId.ToString()
+			    };
+
+			    var (results, _, _) = await dataSelectorsService.GetJsonResponseAsync(dataSelectorSettings, true);
+
+			    foreach (var item in results)
+			    {
+				    var receiver = item.Value<string>(contentSettings.Selector);
+				    if (String.IsNullOrWhiteSpace(receiver))
+				    {
+					    // TODO: Log error/warning or something
+					    continue;
+				    }
+
+				    receivers.Add(receiver, item);
 			    }
 		    }
-		    else if (communicationSetting.ReceiversDataSelectorId > 0)
+		    else if (communicationSetting.ReceiversList.Any())
 		    {
-			    
-		    }
-		    else if (communicationSetting.ReceiversList != null && communicationSetting.ReceiversList.Any())
-		    {
-			    receivers.AddRange(communicationSetting.ReceiversList);
+			    foreach (var receiver in communicationSetting.ReceiversList)
+			    {
+				    receivers.Add(receiver, null);
+			    }
 		    }
 		    
 		    if(!receivers.Any())
 		    {
-			    // TODO error
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There are no receivers for the communication with ID '{communicationSetting.Id}'. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
 			    continue;
 		    }
 
+		    // Generate communication for each receiver.
 		    foreach (var receiver in receivers)
 		    {
+			    // TODO: Use receiver.Value for replacements in content of the communication
 			    switch (communication.Type)
 			    {
 				    case CommunicationTypes.Email:
-					    await gclCommunicationsService.SendEmailAsync(receiver, contentSettings.Subject, contentSettings.Content);
+					    await gclCommunicationsService.SendEmailAsync(receiver.Key, contentSettings.Subject, contentSettings.Content);
 					    break;
 				    case CommunicationTypes.Sms:
-					    await gclCommunicationsService.SendSmsAsync(receiver, contentSettings.Content);
+					    await gclCommunicationsService.SendSmsAsync(receiver.Key, contentSettings.Content);
 					    break;
 				    case CommunicationTypes.WhatsApp:
 					    throw new NotImplementedException();
