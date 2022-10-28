@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Net.Mail;
 using System.Threading.Tasks;
@@ -132,19 +133,54 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    break;
 			    case SendTriggerTypes.Recurring:
 				    var currentDate = DateTime.Now;
+				    
+				    // Don't send the communication if we don't have all required values or if today is not between the start and end date. 
 				    if (!communicationSetting.TriggerStart.HasValue ||
 				        !communicationSetting.TriggerEnd.HasValue ||
 				        !communicationSetting.TriggerTime.HasValue ||
 				        communicationSetting.TriggerStart > currentDate ||
-				        communicationSetting.TriggerEnd < currentDate ||
-				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Week && !communicationSetting.TriggerWeekDays.IsToday() ) ||
-				        // If trigger is based on month fit the given day within the number of days in the month, e.g. if the trigger is set on the 31th and the month only has 30 days it will be executed on the 30th.
-				        (communicationSetting.TriggerPeriodType == TriggerPeriodTypes.Month && Math.Min(DateTime.DaysInMonth(currentDate.Year, currentDate.Month), communicationSetting.TriggerDayOfMonth) != currentDate.Day) ||
-				        communicationSetting.TriggerTime.Value.TimeOfDay > currentDate.TimeOfDay ||
-				        lastProcessed.DateTime.Day >= communicationSetting.TriggerTime.Value.Day)
+				        communicationSetting.TriggerEnd < currentDate)
 				    {
 					    continue;
 				    }
+				    
+				    // Calculate the next date and time that this should be processed.
+				    var nextDateTimeToProcess = new DateTime(lastProcessed.DateTime.Year, lastProcessed.DateTime.Month, lastProcessed.DateTime.Day, communicationSetting.TriggerTime.Value.Hours, communicationSetting.TriggerTime.Value.Minutes, 0);
+				    switch (communicationSetting.TriggerPeriodType)
+				    {
+					    case TriggerPeriodTypes.Week:
+						    // Always start at the next day, because we never send communication more than once a day and that makes the calculations below easier.
+						    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(1);
+						    while (!communicationSetting.TriggerWeekDays.Value.IsWeekday(nextDateTimeToProcess.DayOfWeek))
+						    {
+							    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(1);
+						    }
+
+						    // Now we need to check the week of year. If the next date to process is in the same week, we can always handle that communication because then it's been set to run at multiple days per week.
+						    // If it's not the same week, we need to check if it's the correct week, because it's possible to set the communication to be sent every 3 weeks for example.
+						    var newWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(nextDateTimeToProcess, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+						    var lastProcessedWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(lastProcessed.DateTime, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+						    if (newWeekNumber != lastProcessedWeekNumber)
+						    {
+							    // If the next date to process is a new week, add the amount of weeks that the user indicated, minus 1 because we are already 1 week ahead at this point.
+							    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(7 * (communicationSetting.TriggerPeriodValue - 1));
+						    }
+
+						    break;
+					    case TriggerPeriodTypes.Month:
+						    nextDateTimeToProcess = nextDateTimeToProcess.AddMonths(communicationSetting.TriggerPeriodValue);
+						    nextDateTimeToProcess = new DateTime(nextDateTimeToProcess.Year, nextDateTimeToProcess.Month, Math.Min(DateTime.DaysInMonth(currentDate.Year, currentDate.Month), communicationSetting.TriggerDayOfMonth));
+						    break;
+					    default:
+						    throw new ArgumentOutOfRangeException(nameof(communicationSetting.TriggerPeriodType), communicationSetting.TriggerPeriodType.ToString());
+				    }
+
+				    // Don't send the communication if the next date and time is in the future.
+				    if (nextDateTimeToProcess > currentDate)
+				    {
+					    continue;
+				    }
+
 				    break;
 			    default:
 				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString());
@@ -198,20 +234,47 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    // Generate communication for each receiver.
 		    foreach (var receiver in receivers)
 		    {
-			    // TODO: Use receiver.Value for replacements in content of the communication
 			    var subject = contentSettings.Subject;
 			    var content = contentSettings.Content;
 
 			    if (receiver.Value != null)
 			    {
+				    var dataSelectorSettings = new DataSelectorRequestModel
+				    {
+					    DataSelectorId = communicationSetting.ReceiversDataSelectorId,
+					    QueryId = communicationSetting.ReceiversQueryId.ToString().EncryptWithAesWithSalt(withDateTime: true)
+				    };
+				    
 				    if (!String.IsNullOrWhiteSpace(subject))
 				    {
 					    subject = stringReplacementsService.DoReplacements(subject, receiver.Value);
+
+					    // Replace content data selector or query for each receiver.
+					    if (communicationSetting.ReceiversDataSelectorId > 0 || communicationSetting.ReceiversQueryId > 0)
+					    {
+						    dataSelectorSettings.OutputTemplate = subject;
+						    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+						    if (!String.IsNullOrWhiteSpace(result))
+						    {
+							    subject = result;
+						    }
+					    }
 				    }
 
 				    if (!String.IsNullOrWhiteSpace(content))
 				    {
 					    content = stringReplacementsService.DoReplacements(content, receiver.Value);
+
+					    // Replace content data selector or query for each receiver.
+					    if (communicationSetting.ReceiversDataSelectorId > 0 || communicationSetting.ReceiversQueryId > 0)
+					    {
+						    dataSelectorSettings.OutputTemplate = subject;
+						    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+						    if (!String.IsNullOrWhiteSpace(result))
+						    {
+							    subject = result;
+						    }
+					    }
 				    }
 			    }
 
