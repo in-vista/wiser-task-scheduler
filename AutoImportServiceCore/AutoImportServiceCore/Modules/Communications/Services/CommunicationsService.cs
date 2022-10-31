@@ -118,7 +118,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There is no 'LastProcessed' for '{communication.Type}' with ID '{communicationSetting.Id}'. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
 			    continue;
 		    }
-		    
+
 		    // Check if the communication needs to be generated based on it's type and associated settings.
 		    switch (communicationSetting.SendTriggerType)
 		    {
@@ -130,10 +130,11 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    {
 					    continue;
 				    }
+
 				    break;
 			    case SendTriggerTypes.Recurring:
 				    var currentDate = DateTime.Now;
-				    
+
 				    // Don't send the communication if we don't have all required values or if today is not between the start and end date. 
 				    if (!communicationSetting.TriggerStart.HasValue ||
 				        !communicationSetting.TriggerEnd.HasValue ||
@@ -143,7 +144,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    {
 					    continue;
 				    }
-				    
+
 				    // Calculate the next date and time that this should be processed.
 				    var nextDateTimeToProcess = new DateTime(lastProcessed.DateTime.Year, lastProcessed.DateTime.Month, lastProcessed.DateTime.Day, communicationSetting.TriggerTime.Value.Hours, communicationSetting.TriggerTime.Value.Minutes, 0);
 				    switch (communicationSetting.TriggerPeriodType)
@@ -224,8 +225,8 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 				    receivers.Add(receiver, null);
 			    }
 		    }
-		    
-		    if(!receivers.Any())
+
+		    if (!receivers.Any())
 		    {
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There are no receivers for the communication with ID communication. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
 			    continue;
@@ -237,43 +238,46 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 			    var subject = contentSettings.Subject;
 			    var content = contentSettings.Content;
 
-			    if (receiver.Value != null)
+			    var dataSelectorSettings = new DataSelectorRequestModel
 			    {
-				    var dataSelectorSettings = new DataSelectorRequestModel
-				    {
-					    DataSelectorId = communicationSetting.ReceiversDataSelectorId,
-					    QueryId = communicationSetting.ReceiversQueryId.ToString().EncryptWithAesWithSalt(withDateTime: true)
-				    };
-				    
-				    if (!String.IsNullOrWhiteSpace(subject))
+				    DataSelectorId = communicationSetting.ContentDataSelectorId,
+				    QueryId = communicationSetting.ContentQueryId.ToString().EncryptWithAesWithSalt(withDateTime: true)
+			    };
+
+			    if (!String.IsNullOrWhiteSpace(subject))
+			    {
+				    if (receiver.Value != null)
 				    {
 					    subject = stringReplacementsService.DoReplacements(subject, receiver.Value);
-
-					    // Replace content data selector or query for each receiver.
-					    if (communicationSetting.ReceiversDataSelectorId > 0 || communicationSetting.ReceiversQueryId > 0)
-					    {
-						    dataSelectorSettings.OutputTemplate = subject;
-						    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
-						    if (!String.IsNullOrWhiteSpace(result))
-						    {
-							    subject = result;
-						    }
-					    }
 				    }
 
-				    if (!String.IsNullOrWhiteSpace(content))
+				    // Replace content data selector or query for each receiver.
+				    if (communicationSetting.ContentDataSelectorId > 0 || communicationSetting.ContentQueryId > 0)
+				    {
+					    dataSelectorSettings.OutputTemplate = subject;
+					    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+					    if (!String.IsNullOrWhiteSpace(result))
+					    {
+						    subject = result;
+					    }
+				    }
+			    }
+
+			    if (!String.IsNullOrWhiteSpace(content))
+			    {
+				    if (receiver.Value != null)
 				    {
 					    content = stringReplacementsService.DoReplacements(content, receiver.Value);
+				    }
 
-					    // Replace content data selector or query for each receiver.
-					    if (communicationSetting.ReceiversDataSelectorId > 0 || communicationSetting.ReceiversQueryId > 0)
+				    // Replace content data selector or query for each receiver.
+				    if (communicationSetting.ContentDataSelectorId > 0 || communicationSetting.ContentQueryId > 0)
+				    {
+					    dataSelectorSettings.OutputTemplate = content;
+					    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+					    if (!String.IsNullOrWhiteSpace(result))
 					    {
-						    dataSelectorSettings.OutputTemplate = subject;
-						    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
-						    if (!String.IsNullOrWhiteSpace(result))
-						    {
-							    subject = result;
-						    }
+						    content = result;
 					    }
 				    }
 			    }
@@ -292,7 +296,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
 			    }
 		    }
-		    
+
 		    lastProcessed.DateTime = DateTime.Now;
 		    databaseConnection.AddParameter("id", communicationSetting.Id);
 		    databaseConnection.AddParameter("lastProcessed", JsonConvert.SerializeObject(communicationSetting.LastProcessed, Formatting.Indented));
