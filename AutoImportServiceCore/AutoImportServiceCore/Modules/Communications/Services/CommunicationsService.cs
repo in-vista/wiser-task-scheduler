@@ -215,6 +215,12 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 					    continue;
 				    }
 
+				    if (receivers.ContainsKey(receiver))
+				    {
+					    await logService.LogWarning(logger, LogScopes.RunBody, communication.LogSettings, $"Duplicate receiver ({receiver}) for communication with ID '{communicationSetting.Id}'. Skipped line: {JsonConvert.SerializeObject(item)}", configurationServiceName, communication.TimeId, communication.Order);
+					    continue;
+				    }
+
 				    receivers.Add(receiver, item);
 			    }
 		    }
@@ -222,6 +228,12 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    {
 			    foreach (var receiver in communicationSetting.ReceiversList)
 			    {
+				    if (receivers.ContainsKey(receiver))
+				    {
+					    await logService.LogWarning(logger, LogScopes.RunBody, communication.LogSettings, $"Duplicate receiver ({receiver}) for communication with ID '{communicationSetting.Id}'.", configurationServiceName, communication.TimeId, communication.Order);
+					    continue;
+				    }
+				    
 				    receivers.Add(receiver, null);
 			    }
 		    }
