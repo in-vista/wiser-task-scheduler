@@ -77,7 +77,7 @@ namespace AutoImportServiceCore.Core.Helpers
             if (Char.IsLetter(indexLetter))
             {
                 var rowIndex = (int) indexLetter - 105;
-                if (rowIndex > 0 && rowIndex < rows.Count)
+                if (rowIndex >= 0 && rowIndex < rows.Count)
                 {
                     index = rows[rowIndex];
                 }
