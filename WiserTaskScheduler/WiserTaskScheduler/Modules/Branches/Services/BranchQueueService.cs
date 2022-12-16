@@ -79,7 +79,7 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
 
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Executing HTTP API in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Start handling branches queue in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
             // Make sure the wiser_branch_queue table exists, so that we don't get errors when running the WTS for new customers.
             await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
