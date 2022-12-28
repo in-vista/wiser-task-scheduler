@@ -171,7 +171,7 @@ FROM {WiserTableNames.WtsServices}
     /// <returns></returns>
     private Service GetServiceFromDataRow(DataRow row)
     {
-        return new Service()
+        return new Service
         {
             Id = row.Field<int>("id"),
             Configuration = row.Field<string>("configuration"),
@@ -180,7 +180,7 @@ FROM {WiserTableNames.WtsServices}
             Scheme = row.Field<string>("scheme"),
             LastRun = row.Field<DateTime?>("last_run"),
             NextRun = row.Field<DateTime?>("next_run"),
-            RunTime = row.Field<double>("run_time"),
+            RunTime = row.IsNull("run_time") ? 0 : row.Field<double>("run_time"),
             State = row.Field<string>("state"),
             TemplateId = row.Field<int>("template_id")
         };
