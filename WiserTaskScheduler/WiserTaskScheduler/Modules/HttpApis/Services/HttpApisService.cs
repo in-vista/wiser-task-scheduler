@@ -71,7 +71,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 do
                 {
                     var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, configurationServiceName, url);
-                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
+                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}?", ReplacementHelper.EmptyRows, result, false);
                     jArray.Add(result);
                 } while (!String.IsNullOrWhiteSpace(url));
 
@@ -97,7 +97,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     do
                     {
                         var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url, i);
-                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
+                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}?", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));
                 }
