@@ -1,5 +1,4 @@
-﻿using system;
-namespace WiserTaskScheduler.Modules.ServerMonitors.Enums
+﻿namespace WiserTaskScheduler.Modules.ServerMonitors.Enums
 {
     public enum ServerMonitorTypes
     {
