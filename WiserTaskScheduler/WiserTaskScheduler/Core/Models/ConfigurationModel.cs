@@ -9,6 +9,7 @@ using WiserTaskScheduler.Modules.HttpApis.Models;
 using WiserTaskScheduler.Modules.ImportFiles.Models;
 using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
+using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.WiserImports.Models;
 
 namespace WiserTaskScheduler.Core.Models
@@ -160,6 +161,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("WiserImport")]
         public WiserImportModel[] WiserImports { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Server Monitors that have been placed inside the group
+        /// </summary>
+        [XmlArray("ServerMonitors")]
+        [XmlArrayItem(typeof(ServerMonitorModel))]
+        public ServerMonitorModel[] ServerMonitorsGroup { get; set; }
+        /// <summary>
+        /// Gets or sets the Server Monitors that have been placed outside the group
+        /// </summary>
+        [XmlElement("ServerMonitor")]
+        public ServerMonitorModel[] ServerMonitor { get; set; }
+
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.

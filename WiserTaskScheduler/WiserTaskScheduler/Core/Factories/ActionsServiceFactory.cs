@@ -17,6 +17,8 @@ using WiserTaskScheduler.Modules.ImportFiles.Interfaces;
 using WiserTaskScheduler.Modules.ImportFiles.Models;
 using WiserTaskScheduler.Modules.Queries.Interfaces;
 using WiserTaskScheduler.Modules.Queries.Models;
+using WiserTaskScheduler.Modules.ServerMonitors.Interfaces;
+using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.WiserImports.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Models;
 
@@ -59,6 +61,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IWiserImportsService>() as IActionsService;
                 case CommunicationModel:
                     return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
+                case ServerMonitorModel:
+                    return serviceProvider.GetRequiredService<IServerMonitorsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }
