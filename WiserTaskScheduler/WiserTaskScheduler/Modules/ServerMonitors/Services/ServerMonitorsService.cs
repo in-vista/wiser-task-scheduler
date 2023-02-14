@@ -27,7 +27,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private string connectionString;
 
-        private bool AboveThreshold;
+        private bool diskThresholdReached;
 
         public ServerMonitorsService(IServiceProvider serviceProvider, ILogService logService, ILogger<ServerMonitorsService> logger)
         {
@@ -70,11 +70,20 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
                         await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk} has {disk.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
+                        //check if the threshold is higher then the free space Available.
                         if (percentage < threshold)
                         {
                             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk.Name} doesn't have much space left", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-                            //if there is not enough space.
-                            //TODO send email to company informing about space issue.
+                            //only send an email if the disk threshold hasn't already been reached.
+                            if(!diskThresholdReached)
+                            {
+                                diskThresholdReached = true;
+                                //TODO send email informing about disk usage.
+                            }
+                        }   
+                        else
+                        {
+                            diskThresholdReached = false;
                         }
                     }
                     break;
