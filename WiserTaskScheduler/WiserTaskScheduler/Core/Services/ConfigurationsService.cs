@@ -113,6 +113,8 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.Communications,
                 configuration.WiserImportGroup,
                 configuration.WiserImports,
+                configuration.FtpGroup,
+                configuration.Ftps,
                 configuration.CleanupWiserHistoryGroup,
                 configuration.CleanupWiserHistories
             };
