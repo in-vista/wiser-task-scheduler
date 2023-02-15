@@ -21,4 +21,8 @@
     <PackageReference Include="SlackNet.AspNetCore" Version="0.10.18" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HelperLibrary\HelperLibrary.csproj" />
+  </ItemGroup>
 </Project>

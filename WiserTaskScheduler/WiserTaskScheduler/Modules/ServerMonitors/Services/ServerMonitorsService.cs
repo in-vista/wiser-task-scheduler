@@ -16,6 +16,17 @@ using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Modules.Queries.Services;
 using System.IO;
+using HelperLibrary;
+using Microsoft.Extensions.DependencyInjection;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.Objects.Interfaces;
+using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
+using Microsoft.Extensions.Options;
+using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Core.Services;
+using GeeksCoreLibrary.Modules.Communication.Services;
+using GeeksCoreLibrary.Modules.DataSelector.Services;
+using GeeksCoreLibrary.Modules.Templates.Services;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -29,6 +40,14 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private bool diskThresholdReached;
 
+        DriveInfo[] allDrives = DriveInfo.GetDrives();
+        string receiver;
+        string subject;
+        string body;
+
+
+        Dictionary<string, bool> diskThresholds = new Dictionary<string, bool>();
+
         public ServerMonitorsService(IServiceProvider serviceProvider, ILogService logService, ILogger<ServerMonitorsService> logger)
         {
             this.serviceProvider = serviceProvider;
@@ -37,7 +56,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         }
 
 
-        public Task InitializeAsync(ConfigurationModel configuration)
+        public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
             connectionString = configuration.ConnectionString;
             return Task.CompletedTask;
@@ -46,15 +65,36 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
             var monitorItem = (ServerMonitorModel)action;
+            using var scope = serviceProvider.CreateScope();
+            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+
+            await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+
+            // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
+            // Get all other services and create the Wiser Items Service with one of the services missing.
+            var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
+            var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
+            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
+            var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
+            var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<CommunicationsService>>();
+            var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
+
+            var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, null, null, null, null, null, databaseHelpersService);
+            var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, templatesService, null, null, dataSelectorsServiceLogger, null);
+            var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, dataSelectorsService, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+            var gclCommunicationsService = new CommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
+
             int threshold = monitorItem.Threshold;
 
             //create the right performanceCounter variable types.
             PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
             PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
-            DriveInfo[] allDrives = DriveInfo.GetDrives();
+
 
             double cpuValue;
             double firstValue;
+
 
             //Check which type of server monitor is used.
             //Cpu is default Value.
@@ -67,6 +107,10 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                         double freeSpace = disk.TotalFreeSpace;
                         double fullSpace = disk.TotalSize;
                         double percentage = freeSpace / fullSpace * 100;
+                        //set the right values for the email.
+                        receiver = monitorItem.EmailAddressForWarning;
+                        subject = "Low disk space";
+                        body = $"Disk {disk.Name} has low space:";
 
                         await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk} has {disk.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
@@ -78,7 +122,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                             if(!diskThresholdReached)
                             {
                                 diskThresholdReached = true;
-                                //TODO send email informing about disk usage.
+                                await gclCommunicationsService.SendEmailAsync("nielsmoone@happyhorizon.com", "Low disk Usage", $"Disk {disk.Name} is low on space");
                             }
                         }   
                         else
