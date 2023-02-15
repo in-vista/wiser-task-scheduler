@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.CleanupItems.Models;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
 using WiserTaskScheduler.Modules.HttpApis.Models;
@@ -11,6 +12,7 @@ using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.WiserImports.Models;
+using WiserTaskScheduler.Modules.Ftps.Models;
 
 namespace WiserTaskScheduler.Core.Models
 {
@@ -161,6 +163,32 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("WiserImport")]
         public WiserImportModel[] WiserImports { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the FTPs that have been placed in the group.
+        /// </summary>
+        [XmlArray("Ftps")]
+        [XmlArrayItem(typeof(FtpModel))]
+        public FtpModel[] FtpGroup { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the FTPs that have been placed outside the group.
+        /// </summary>
+        [XmlElement("Ftp")]
+        public FtpModel[] Ftps { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the Wiser histories that need to be cleaned that have been placed in the group.
+        /// </summary>
+        [XmlArray("CleanupWiserHistories")]
+        [XmlArrayItem(typeof(CleanupWiserHistoryModel))]
+        public CleanupWiserHistoryModel[] CleanupWiserHistoryGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser histories that need to be cleaned that have been placed outside the group.
+        /// </summary>
+        [XmlElement("CleanupWiserHistory")]
+        public CleanupWiserHistoryModel[] CleanupWiserHistories { get; set; }
 
         /// <summary>
         /// Gets or sets the Server Monitors that have been placed inside the group

@@ -7,6 +7,8 @@ using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.CleanupItems.Interfaces;
 using WiserTaskScheduler.Modules.CleanupItems.Models;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Interfaces;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Interfaces;
 using WiserTaskScheduler.Modules.Communications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Interfaces;
@@ -21,6 +23,8 @@ using WiserTaskScheduler.Modules.ServerMonitors.Interfaces;
 using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.WiserImports.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Models;
+using WiserTaskScheduler.Modules.Ftps.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Models;
 
 namespace WiserTaskScheduler.Core.Factories
 {
@@ -63,6 +67,10 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
                 case ServerMonitorModel:
                     return serviceProvider.GetRequiredService<IServerMonitorsService>() as IActionsService;
+                case FtpModel:
+                    return serviceProvider.GetRequiredService<IFtpsService>() as IActionsService;
+                case CleanupWiserHistoryModel:
+                    return serviceProvider.GetRequiredService<ICleanupWiserHistoryService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

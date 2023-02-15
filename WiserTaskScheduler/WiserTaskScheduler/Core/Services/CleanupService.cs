@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -40,8 +41,12 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task CleanupAsync()
         {
+            using var scope = serviceProvider.CreateScope();
+            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            
             await CleanupFilesAsync();
-            await CleanupDatabaseLogsAsync();
+            await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
         }
 
         /// <summary>
@@ -49,7 +54,7 @@ namespace WiserTaskScheduler.Core.Services
         /// </summary>
         private async Task CleanupFilesAsync()
         {
-            if (cleanupServiceSettings.FileFolderPaths == null || cleanupServiceSettings.FileFolderPaths.Length == 0)
+            if (cleanupServiceSettings.FileFolderPaths == null || !cleanupServiceSettings.FileFolderPaths.Any())
             {
                 return;
             }
@@ -93,15 +98,16 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Cleanup logs in the database older than the set number of days in the WTS logs.
         /// </summary>
-        private async Task CleanupDatabaseLogsAsync()
+        private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
-            using var scope = serviceProvider.CreateScope();
-            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-            
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
             var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
-
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", LogName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsLogs);
+            }
         }
     }
 }

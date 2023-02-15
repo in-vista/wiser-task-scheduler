@@ -6,9 +6,13 @@ using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Slack.modules;
+using SlackNet;
+using SlackNet.WebApi;
 
 namespace WiserTaskScheduler.Core.Services
 {
@@ -16,11 +20,12 @@ namespace WiserTaskScheduler.Core.Services
     {
         private readonly IServiceProvider serviceProvider;
 
-        private bool updatedLogTable;
-
-        public LogService(IServiceProvider serviceProvider)
+        private readonly SlackSettings slackSettings;
+        
+        public LogService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
         {
             this.serviceProvider = serviceProvider;
+            slackSettings = wtsSettings.Value.SlackSettings;
         }
 
         /// <inheritdoc />
@@ -70,19 +75,11 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     try
                     {
+                        using var scope = serviceProvider.CreateScope();
                         // Try writing the log to the database.
                         try
                         {
-                            using var scope = serviceProvider.CreateScope();
                             using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-                            
-                            // Update log table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
-                            if (!updatedLogTable)
-                            {
-                                var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-                                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsLogs});
-                                updatedLogTable = true;
-                            }
 
                             databaseConnection.ClearParameters();
                             databaseConnection.AddParameter("message", message);
@@ -93,11 +90,10 @@ namespace WiserTaskScheduler.Core.Services
                             databaseConnection.AddParameter("timeId", timeId);
                             databaseConnection.AddParameter("order", order);
                             databaseConnection.AddParameter("addedOn", DateTime.Now);
-                            
 #if DEBUG
                             databaseConnection.AddParameter("isTest", 1);
 #else
-                    databaseConnection.AddParameter("isTest", 0);
+                            databaseConnection.AddParameter("isTest", 0);
 #endif
                             
                             await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)
@@ -108,8 +104,17 @@ namespace WiserTaskScheduler.Core.Services
                             // If writing to the database fails log its error.
                             logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
                         }
-
                         logger.Log(logLevel, message);
+
+                        // If there is a slackChannel and SlackAccesToken Send a slack message if critical error.
+                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
+                        {
+                            if (logLevel == logSettings.SlackLogLevel)
+                            {
+                                var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
+                                await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}'{Environment.NewLine}order :{Environment.NewLine}message :{Environment.NewLine}{message}{Environment.NewLine}date : {DateTime.Now}",Channel=slackSettings.SlackChannel});
+                            }    
+                        }
                     }
                     catch
                     {

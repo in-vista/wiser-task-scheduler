@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -22,6 +24,8 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ILogger<ConfigurationsService> logger;
         private readonly IActionsServiceFactory actionsServiceFactory;
         private readonly IErrorNotificationService errorNotificationService;
+        private readonly IDatabaseHelpersService databaseHelpersService;
+        private readonly WtsSettings wtsSettings;
 
         private readonly SortedList<int, ActionModel> actions;
         private readonly Dictionary<string, IActionsService> actionsServices;
@@ -30,11 +34,16 @@ namespace WiserTaskScheduler.Core.Services
         private int timeId;
         private string serviceFailedNotificationEmails;
 
+        private HashSet<string> tablesToOptimize;
+
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
         /// <inheritdoc />
         public string Name { get; set; }
+
+        /// <inheritdoc />
+        public bool HasAction => actions.Any();
 
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsService"/>.
@@ -42,15 +51,21 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
         /// <param name="actionsServiceFactory"></param>
-        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService)
+        /// <param name="errorNotificationService"></param>
+        /// <param name="databaseHelpersService"></param>
+        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IDatabaseHelpersService databaseHelpersService, IOptions<WtsSettings> wtsSettings)
         {
             this.logService = logService;
             this.logger = logger;
             this.actionsServiceFactory = actionsServiceFactory;
             this.errorNotificationService = errorNotificationService;
+            this.databaseHelpersService = databaseHelpersService;
+            this.wtsSettings = wtsSettings.Value;
 
             actions = new SortedList<int, ActionModel>();
             actionsServices = new Dictionary<string, IActionsService>();
+
+            tablesToOptimize = new HashSet<string>();
         }
 
         /// <inheritdoc />
@@ -69,12 +84,18 @@ namespace WiserTaskScheduler.Core.Services
                 if (!actionsServices.ContainsKey(action.GetType().ToString()))
                 {
                     var actionsService = actionsServiceFactory.GetActionsServiceForAction(action);
-                    await actionsService.InitializeAsync(configuration);
+                    await actionsService.InitializeAsync(configuration, tablesToOptimize);
                     actionsServices.Add(action.GetType().ToString(), actionsService);
                 }
             }
 
-            await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
+            if (!actions.Any())
+            {
+                await logService.LogWarning(logger, LogScopes.StartAndStop, LogSettings, $"{configurationServiceName} has no actions for time ID '{timeId}'. Please make sure the time ID of the run scheme and actions are filled in correctly.", configurationServiceName, timeId);
+                return;
+            }
+
+            await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{configurationServiceName} has {actions.Count} action(s) for time ID '{timeId}'.", configurationServiceName, timeId);
         }
 
         /// <summary>
@@ -101,6 +122,10 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.WiserImports,
                 configuration.ServerMonitorsGroup,
                 configuration.ServerMonitor,
+                configuration.FtpGroup,
+                configuration.Ftps,
+                configuration.CleanupWiserHistoryGroup,
+                configuration.CleanupWiserHistories
             };
 
             var allActions = new List<ActionModel>();
@@ -170,6 +195,7 @@ namespace WiserTaskScheduler.Core.Services
             var resultSets = new JObject();
             var currentOrder = 0;
             var stopwatch = new Stopwatch();
+            tablesToOptimize.Clear();
 
             try
             {
@@ -195,11 +221,17 @@ namespace WiserTaskScheduler.Core.Services
                     stopwatch.Stop();
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Action finished in {stopwatch.Elapsed}", configurationServiceName, timeId, action.Value.Order);
                 }
+
+                if (tablesToOptimize.Any())
+                {
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Optimizing tables: {String.Join(',', tablesToOptimize)}", configurationServiceName, timeId);
+                    await databaseHelpersService.OptimizeTablesAsync(tablesToOptimize.ToArray());
+                }
             }
             catch (Exception e)
             {
                 await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName} due to exception in time ID '{timeId}' and order '{currentOrder}', will try again next time. Exception {e}", configurationServiceName, timeId, currentOrder);
-                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' failed.", $"Wiser Task Scheduler failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
+                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' of '{wtsSettings.Name}' failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
             }
         }
 
