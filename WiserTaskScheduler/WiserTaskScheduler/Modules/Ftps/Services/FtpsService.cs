@@ -35,7 +35,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
     }
     
     /// <inheritdoc />
-    public Task InitializeAsync(ConfigurationModel configuration)
+    public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         return Task.CompletedTask;
     }
