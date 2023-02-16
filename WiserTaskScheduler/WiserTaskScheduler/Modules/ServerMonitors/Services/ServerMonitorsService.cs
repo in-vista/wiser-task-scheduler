@@ -38,15 +38,21 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private string connectionString;
 
-        private bool diskThresholdReached;
+        private DriveInfo[] allDrives = DriveInfo.GetDrives();
+        private Dictionary<string, bool> emailDiskSent = new Dictionary<string, bool>();
+        private bool emailRamSent;
+        
 
-        DriveInfo[] allDrives = DriveInfo.GetDrives();
-        string receiver;
-        string subject;
-        string body;
+        private string receiver;
+        private string subject;
+        private string body;
 
+        //create the right performanceCounter variable types.
+        PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+        PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
 
-        Dictionary<string, bool> diskThresholds = new Dictionary<string, bool>();
+        float cpuValue;
+        float firstValue;
 
         public ServerMonitorsService(IServiceProvider serviceProvider, ILogService logService, ILogger<ServerMonitorsService> logger)
         {
@@ -87,13 +93,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
             int threshold = monitorItem.Threshold;
 
-            //create the right performanceCounter variable types.
-            PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-            PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
 
 
-            double cpuValue;
-            double firstValue;
 
 
             //Check which type of server monitor is used.
@@ -101,6 +102,14 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             switch (monitorItem.ServerMonitorType)
             {
                 case ServerMonitorTypes.Disk:
+                    if(emailDiskSent.Count == 0)
+                    {
+                        foreach (var disk in allDrives)
+                        {
+                            emailDiskSent[disk.Name] = false;
+                        }
+                    }
+
                     foreach (var disk in allDrives)
                     {
                         //calculate the percentage of free space availible and see if it matches with the given threshold.
@@ -110,7 +119,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                         //set the right values for the email.
                         receiver = monitorItem.EmailAddressForWarning;
                         subject = "Low disk space";
-                        body = $"Disk {disk.Name} has low space:";
+                        body = $"Disk {disk.Name} is low on space:";
 
                         await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk} has {disk.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
@@ -119,27 +128,50 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                         {
                             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk.Name} doesn't have much space left", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
                             //only send an email if the disk threshold hasn't already been reached.
-                            if(!diskThresholdReached)
+                            if(!emailDiskSent[disk.Name])
                             {
-                                diskThresholdReached = true;
-                                await gclCommunicationsService.SendEmailAsync("nielsmoone@happyhorizon.com", "Low disk Usage", $"Disk {disk.Name} is low on space");
+                                emailDiskSent[disk.Name] = true;
+                                await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
                             }
                         }   
                         else
                         {
-                            diskThresholdReached = false;
+                            emailDiskSent[disk.Name] = false;
                         }
                     }
                     break;
                 case ServerMonitorTypes.Ram:
                     double ramValue = ramCounter.NextValue();
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"RAM is: {ramValue}MB available", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+                    receiver = monitorItem.EmailAddressForWarning;
+                    subject = "Low on RAM space.";
+                    body = $"Your ram has {ramValue}MB available and is below your set threshold of {threshold}MB";
+
+                    //check if the ram is above the threshold.
+                    if (ramValue < threshold)
+                    {
+                        if(!emailRamSent)
+                        {
+                            emailRamSent = true;
+                            await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                        }
+                    }
+                    else
+                    {
+                        emailRamSent = false;
+                    }
                     break;
                 case ServerMonitorTypes.Cpu:
-                    //NextValue has to be run twice for cpu because the first one is always 0.
-                    firstValue = cpuCounter.NextValue();
+                    //NextValue's first value is always 0.
                     cpuValue = cpuCounter.NextValue();
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU is: {cpuValue}%", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+                    receiver = monitorItem.EmailAddressForWarning;
+                    subject = "CPU usage too high.";
+                    body = $"The CPU usage is above {threshold}, CPU usage = {cpuValue}.";
+
+
+                    //TODO calculate the confidence interval of the cpu to determine if an email needs to be send.
+                    //This prevents spikes from triggering an email when it is not needed
                     break;
                 default:
                     break;

@@ -16,11 +16,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Models
         public int Threshold { get; set; }
 
         /// <summary>
-        /// Gets or sets the type of communication to process.
-        /// </summary>
-        public CommunicationTypes CommunicationType { get; set; } = CommunicationTypes.Email;
-
-        /// <summary>
         /// Gets or sets the type of Server Monitor.
         /// </summary>
         public ServerMonitorTypes ServerMonitorType { get; set; }
@@ -29,10 +24,5 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Models
         /// Gets or sets the email to send the warning to.
         /// </summary>
         public string EmailAddressForWarning { get; set; }
-
-        /// <summary>
-        /// Gets or sets the type of communication to process.
-        /// </summary>
-        public SmtpSettings SmtpSettings { get; set; }
     }
 }
