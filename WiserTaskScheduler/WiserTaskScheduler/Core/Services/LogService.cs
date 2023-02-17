@@ -79,7 +79,7 @@ namespace WiserTaskScheduler.Core.Services
                         // Try writing the log to the database.
                         try
                         {
-                            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+                            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
                             databaseConnection.ClearParameters();
                             databaseConnection.AddParameter("message", message);
