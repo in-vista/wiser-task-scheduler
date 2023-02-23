@@ -27,6 +27,8 @@ using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Communication.Services;
 using GeeksCoreLibrary.Modules.DataSelector.Services;
 using GeeksCoreLibrary.Modules.Templates.Services;
+using DocumentFormat.OpenXml.Spreadsheet;
+using ImageMagick;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -38,21 +40,26 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private string connectionString;
 
-        private DriveInfo[] allDrives = DriveInfo.GetDrives();
-        private Dictionary<string, bool> emailDiskSent = new Dictionary<string, bool>();
+        private Dictionary<string, bool> emailDriveSent = new Dictionary<string, bool>();
         private bool emailRamSent;
+        private bool emailCPUSent;
         
-
         private string receiver;
         private string subject;
         private string body;
 
         //create the right performanceCounter variable types.
-        PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-        PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
+        private PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+        private PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
+        private DriveInfo[] allDrives = DriveInfo.GetDrives();
 
-        float cpuValue;
-        float firstValue;
+        private bool firstValueUsed;
+        private float firstValue;
+        private int cpuIndex;
+        private int aboveThresholdTimer;
+        float[] cpuValues = new float[10];
+
+
 
         public ServerMonitorsService(IServiceProvider serviceProvider, ILogService logService, ILogger<ServerMonitorsService> logger)
         {
@@ -60,7 +67,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             this.logService = logService;
             this.logger = logger;
         }
-
 
         public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
@@ -93,95 +99,193 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
             int threshold = monitorItem.Threshold;
 
-
-
-
-
             //Check which type of server monitor is used.
             //Cpu is default Value.
             switch (monitorItem.ServerMonitorType)
             {
-                case ServerMonitorTypes.Disk:
-                    if(emailDiskSent.Count == 0)
-                    {
-                        foreach (var disk in allDrives)
-                        {
-                            emailDiskSent[disk.Name] = false;
-                        }
-                    }
-
-                    foreach (var disk in allDrives)
-                    {
-                        //calculate the percentage of free space availible and see if it matches with the given threshold.
-                        double freeSpace = disk.TotalFreeSpace;
-                        double fullSpace = disk.TotalSize;
-                        double percentage = freeSpace / fullSpace * 100;
-                        //set the right values for the email.
-                        receiver = monitorItem.EmailAddressForWarning;
-                        subject = "Low disk space";
-                        body = $"Disk {disk.Name} is low on space:";
-
-                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk} has {disk.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-
-                        //check if the threshold is higher then the free space Available.
-                        if (percentage < threshold)
-                        {
-                            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {disk.Name} doesn't have much space left", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-                            //only send an email if the disk threshold hasn't already been reached.
-                            if(!emailDiskSent[disk.Name])
-                            {
-                                emailDiskSent[disk.Name] = true;
-                                await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
-                            }
-                        }   
-                        else
-                        {
-                            emailDiskSent[disk.Name] = false;
-                        }
-                    }
+                case ServerMonitorTypes.Drive:
+                    await GetHardDriveSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
                     break;
                 case ServerMonitorTypes.Ram:
-                    double ramValue = ramCounter.NextValue();
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"RAM is: {ramValue}MB available", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-                    receiver = monitorItem.EmailAddressForWarning;
-                    subject = "Low on RAM space.";
-                    body = $"Your ram has {ramValue}MB available and is below your set threshold of {threshold}MB";
-
-                    //check if the ram is above the threshold.
-                    if (ramValue < threshold)
-                    {
-                        if(!emailRamSent)
-                        {
-                            emailRamSent = true;
-                            await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
-                        }
-                    }
-                    else
-                    {
-                        emailRamSent = false;
-                    }
+                    await GetRAMSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
                     break;
                 case ServerMonitorTypes.Cpu:
-                    //NextValue's first value is always 0.
-                    cpuValue = cpuCounter.NextValue();
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU is: {cpuValue}%", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-                    receiver = monitorItem.EmailAddressForWarning;
-                    subject = "CPU usage too high.";
-                    body = $"The CPU usage is above {threshold}, CPU usage = {cpuValue}.";
-
-
-                    //TODO calculate the confidence interval of the cpu to determine if an email needs to be send.
-                    //This prevents spikes from triggering an email when it is not needed
+                    await GetCpuUsageAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
                     break;
                 default:
                     break;
             }
 
-
             return new JObject
             {
                 {"Results", 0}
             };
+
         }
+
+        public async Task GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+            if (emailDriveSent.Count == 0)
+            {
+                foreach (var disk in allDrives)
+                {
+                    emailDriveSent[disk.Name] = false;
+                }
+            }
+
+            foreach (var drive in allDrives)
+            {
+                //Set the email settings correctly
+                receiver = monitorItem.EmailAddressForWarning;
+                subject = "Low disk space";
+                body = $"Disk {drive.Name} is low on space:";
+
+                //Calculate the percentage of free space availible and see if it matches with the given threshold.
+                double freeSpace = drive.TotalFreeSpace;
+                double fullSpace = drive.TotalSize;
+                double percentage = freeSpace / fullSpace * 100;
+                //Set the right values for the email.
+
+
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+                //Check if the threshold is higher then the free space available.
+                if (percentage < threshold)
+                {
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+                    //Only send an email if the disk threshold hasn't already been reached.
+                    if (!emailDriveSent[drive.Name])
+                    {
+                        emailDriveSent[drive.Name] = true;
+                        await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                    }
+                }
+                else
+                {
+                    emailDriveSent[drive.Name] = false;
+                }
+            }
+        }
+
+        public async Task GetRAMSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+            double ramValue = ramCounter.NextValue();
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"RAM is: {ramValue}MB available", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+            //Set the email settings correctly.
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = "Low on RAM space.";
+            body = $"Your ram has {ramValue}MB available which is below your set threshold of {threshold}MB";
+
+            //Check if the ram is above the threshold.
+            if (ramValue < threshold)
+            {
+                if (!emailRamSent)
+                {
+                    emailRamSent = true;
+                    await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                }
+            }
+            else
+            {
+                emailRamSent = false;
+            }
+        }
+
+        public async Task GetCpuUsageAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+            switch(monitorItem.CpuUsageDetectionType)
+            {
+                case CpuUsageDetectionTypes.ArrayCount:
+                    await GetCpuUsageArrayCountAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
+                    break;
+                case CpuUsageDetectionTypes.Counter:
+                    await GetCpuUsageCounterAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
+                    break;
+            }
+        }
+
+
+        public async Task GetCpuUsageArrayCountAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+            //the first value of performance counter will always be 0.
+            if (!firstValueUsed)
+            {
+                firstValueUsed = true;
+                firstValue = cpuCounter.NextValue();
+            }
+            float count = 0;
+            float realvalue = cpuCounter.NextValue();
+            //gets 60 percent of the size of the array
+            int arrayCountThreshold = (int)(10 * 0.6);
+            //Puts the value into the array.
+            cpuValues[cpuIndex] = realvalue;
+            //if the index for the array is at the end make it start at the beginning again.
+            //so then it loops through the array the whole time.
+            cpuIndex = (cpuIndex + 1) % 10;
+
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = "CPU usage too high.";
+            body = $"The CPU usage is above {threshold}.";
+
+
+            //Counts how many values inside the array are above the threshold and adds them to the count
+            count = cpuValues.Count(val => val > threshold);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Array count is: {count}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+
+            if (count >= arrayCountThreshold)
+            {
+                if (!emailCPUSent)
+                {
+                    await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                    emailCPUSent = true;
+                }
+            }
+            else
+            {
+                emailCPUSent = false;
+            }
+        }
+        public async Task GetCpuUsageCounterAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+
+            //the first value of performance counter will always be 0.
+            if (!firstValueUsed)
+            {
+                firstValueUsed = true;
+                firstValue = cpuCounter.NextValue();
+            }
+            float realvalue = cpuCounter.NextValue();
+
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = "CPU usage too high.";
+            body = $"The CPU usage has been above the threshold for {aboveThresholdTimer} runs.";
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU is: {realvalue}%", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+            if (realvalue > threshold)
+            {
+                aboveThresholdTimer++;
+                if (aboveThresholdTimer >= 6)
+                {
+                    if (!emailCPUSent)
+                    {
+                        await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                        emailCPUSent = true;
+                    }
+                }
+                else
+                {
+                    emailCPUSent = false;
+                }
+            }
+            else
+            {
+                aboveThresholdTimer = 0;
+            }
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU timer count  is: {aboveThresholdTimer}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+        }
+
     }
 }

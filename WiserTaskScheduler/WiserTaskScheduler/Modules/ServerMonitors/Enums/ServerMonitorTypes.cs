@@ -3,7 +3,7 @@
     public enum ServerMonitorTypes
     {
         Cpu,
-        Disk,
+        Drive,
         Ram
     }
 }

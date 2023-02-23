@@ -21,6 +21,11 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Models
         public ServerMonitorTypes ServerMonitorType { get; set; }
 
         /// <summary>
+        /// Gets or sets the type of Usage detection for the CPU Monitor.
+        /// </summary>
+        public CpuUsageDetectionTypes CpuUsageDetectionType { get; set; }
+
+        /// <summary>
         /// Gets or sets the email to send the warning to.
         /// </summary>
         public string EmailAddressForWarning { get; set; }
