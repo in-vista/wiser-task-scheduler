@@ -29,6 +29,7 @@ using GeeksCoreLibrary.Modules.DataSelector.Services;
 using GeeksCoreLibrary.Modules.Templates.Services;
 using DocumentFormat.OpenXml.Spreadsheet;
 using ImageMagick;
+using System.Net.NetworkInformation;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -40,7 +41,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private string connectionString;
 
-        private Dictionary<string, bool> emailDriveSent = new Dictionary<string, bool>();
+        private Dictionary<string, bool> emailDrivesSent = new Dictionary<string, bool>();
         private bool emailRamSent;
         private bool emailCPUSent;
         
@@ -104,7 +105,14 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             switch (monitorItem.ServerMonitorType)
             {
                 case ServerMonitorTypes.Drive:
-                    await GetHardDriveSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
+                    if (monitorItem.DriveName == "All")
+                    {
+                        await GetAllHardDrivesSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
+                    }
+                    else
+                    {
+                        await GetHardDriveSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName, monitorItem.DriveName);
+                    }
                     break;
                 case ServerMonitorTypes.Ram:
                     await GetRAMSpaceAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
@@ -123,28 +131,30 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         }
 
-        public async Task GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        //Gets info over all existing hard drives.
+        public async Task GetAllHardDrivesSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
         {
-            if (emailDriveSent.Count == 0)
+            foreach (var drive in allDrives)
             {
-                foreach (var disk in allDrives)
+                if (!emailDrivesSent.ContainsKey(drive.Name))
                 {
-                    emailDriveSent[disk.Name] = false;
+                    emailDrivesSent[drive.Name] = false;
                 }
             }
 
             foreach (var drive in allDrives)
             {
-                //Set the email settings correctly
-                receiver = monitorItem.EmailAddressForWarning;
-                subject = "Low disk space";
-                body = $"Disk {drive.Name} is low on space:";
-
                 //Calculate the percentage of free space availible and see if it matches with the given threshold.
                 double freeSpace = drive.TotalFreeSpace;
                 double fullSpace = drive.TotalSize;
                 double percentage = freeSpace / fullSpace * 100;
                 //Set the right values for the email.
+
+
+                //Set the email settings correctly
+                receiver = monitorItem.EmailAddressForWarning;
+                subject = "Low disk space";
+                body = $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}";
 
 
                 await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
@@ -155,16 +165,58 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
                     //Only send an email if the disk threshold hasn't already been reached.
-                    if (!emailDriveSent[drive.Name])
+                    if (!emailDrivesSent[drive.Name])
                     {
-                        emailDriveSent[drive.Name] = true;
+                        emailDrivesSent[drive.Name] = true;
                         await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
                     }
                 }
                 else
                 {
-                    emailDriveSent[drive.Name] = false;
+                    emailDrivesSent[drive.Name] = false;
                 }
+            }
+        }
+
+
+        //Gets only the data from 1 Specified Hard Drive.
+        public async Task GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName, string driveName)
+        {
+            DriveInfo drive = new DriveInfo(driveName);
+            //Set the email settings correctly
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = "Low disk space";
+            body = $"Disk {drive.Name} is low on space:";
+
+            if (!emailDrivesSent.ContainsKey(drive.Name))
+            {
+                emailDrivesSent[drive.Name] = false;
+            }
+
+            //Calculate the percentage of free space availible and see if it matches with the given threshold.
+            double freeSpace = drive.TotalFreeSpace;
+            double fullSpace = drive.TotalSize;
+            double percentage = freeSpace / fullSpace * 100;
+            //Set the right values for the email.
+
+
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+            //Check if the threshold is higher then the free space available.
+            if (percentage < threshold)
+            {
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+                //Only send an email if the disk threshold hasn't already been reached.
+                if (!emailDrivesSent[drive.Name])
+                {
+                    emailDrivesSent[drive.Name] = true;
+                    await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                }
+            }
+            else
+            {
+                emailDrivesSent[drive.Name] = false;
             }
         }
 
