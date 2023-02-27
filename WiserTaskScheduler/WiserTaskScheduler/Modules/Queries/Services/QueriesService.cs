@@ -188,7 +188,6 @@ namespace WiserTaskScheduler.Modules.Queries.Services
 
             foreach (var parameterKey in parameterKeys)
             {
-                var parameterName = DatabaseHelpers.CreateValidParameterName(parameterKey.Key);
                 var value = ReplacementHelper.GetValue(parameterKey.Key, rows, (JObject)usingResultSet[rows[0]], false);
 
                 if (parameterKey.Hash)
@@ -196,7 +195,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                     value = StringHelpers.HashValue(value, query.HashSettings);
                 }
                 
-                parameters.Add(new KeyValuePair<string, string>(parameterName, value));
+                parameters.Add(new KeyValuePair<string, string>(parameterKey.ReplacementKey, value));
             }
 
             databaseConnection.ClearParameters();
