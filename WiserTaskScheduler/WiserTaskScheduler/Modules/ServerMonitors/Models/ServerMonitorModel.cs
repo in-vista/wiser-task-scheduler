@@ -21,6 +21,11 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Models
         public string DriveName { get; set; }
 
         /// <summary>
+        /// Gets or sets the name of the Network interface to read the info from.
+        /// </summary>
+        public string NetworkInterfaceName { get; set; }
+
+        /// <summary>
         /// Gets or sets the type of Server Monitor.
         /// </summary>
         public ServerMonitorTypes ServerMonitorType { get; set; }

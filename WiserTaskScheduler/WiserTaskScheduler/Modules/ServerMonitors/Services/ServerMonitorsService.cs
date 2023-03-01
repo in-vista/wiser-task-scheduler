@@ -30,6 +30,7 @@ using GeeksCoreLibrary.Modules.Templates.Services;
 using DocumentFormat.OpenXml.Spreadsheet;
 using ImageMagick;
 using System.Net.NetworkInformation;
+using System.Diagnostics.Metrics;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -44,6 +45,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         private Dictionary<string, bool> emailDrivesSent = new Dictionary<string, bool>();
         private bool emailRamSent;
         private bool emailCPUSent;
+        private bool emailNetworkSent;
         
         private string receiver;
         private string subject;
@@ -119,6 +121,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     break;
                 case ServerMonitorTypes.Cpu:
                     await GetCpuUsageAsync(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
+                    break;
+                case ServerMonitorTypes.Network:
+                    await GetNetworkUtilization(monitorItem, threshold, gclCommunicationsService, configurationServiceName);
                     break;
                 default:
                     break;
@@ -339,5 +344,51 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU timer count  is: {aboveThresholdTimer}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
         }
 
+        public async Task GetNetworkUtilization(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
+        {
+            string networkInterfaceName = monitorItem.NetworkInterfaceName;
+
+
+            const int numberOfIterations = 10;
+
+            PerformanceCounter bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);
+            float bandwidth = bandwidthCounter.NextValue();
+            PerformanceCounter dataSentCounter = new PerformanceCounter("Network Interface", "Bytes Sent/sec", networkInterfaceName);
+
+            PerformanceCounter dataReceivedCounter = new PerformanceCounter("Network Interface", "Bytes Received/sec", networkInterfaceName);
+
+            float sendSum = 0;
+            float receiveSum = 0;
+
+            for (int index = 0; index < numberOfIterations; index++)
+            {
+                sendSum += dataSentCounter.NextValue();
+                receiveSum += dataReceivedCounter.NextValue();
+            }
+            float dataSent = sendSum;
+            float dataReceived = receiveSum;
+
+
+            double utilization = (8 * (dataSent + dataReceived)) / (bandwidth * numberOfIterations) * 100;
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Network utilization: {utilization}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+
+
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = "High network utilization.";
+            body = $"Your network utilization is {utilization} which is above the threshold of {threshold}.";
+
+            if (utilization > threshold)
+            {
+                if(!emailNetworkSent)
+                {
+                    await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
+                }
+            }
+            else
+            {
+                emailNetworkSent = true;
+            }
+
+        }
     }
 }

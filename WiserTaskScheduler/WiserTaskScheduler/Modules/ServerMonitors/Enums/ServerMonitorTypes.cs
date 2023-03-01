@@ -4,7 +4,8 @@
     {
         Cpu,
         Drive,
-        Ram
+        Ram,
+        Network
     }
 }
 
