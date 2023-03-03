@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using WiserTaskScheduler.Core.Interfaces;
@@ -11,12 +10,9 @@ using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Modules.ServerMonitors.Interfaces;
 using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.ServerMonitors.Enums;
-using WiserTaskScheduler.Modules.Body.Interfaces;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Logging;
-using WiserTaskScheduler.Modules.Queries.Services;
 using System.IO;
-using HelperLibrary;
 using Microsoft.Extensions.DependencyInjection;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
@@ -27,10 +23,6 @@ using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Communication.Services;
 using GeeksCoreLibrary.Modules.DataSelector.Services;
 using GeeksCoreLibrary.Modules.Templates.Services;
-using DocumentFormat.OpenXml.Spreadsheet;
-using ImageMagick;
-using System.Net.NetworkInformation;
-using System.Diagnostics.Metrics;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -43,7 +35,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         private string connectionString;
 
         private Dictionary<string, bool> emailDrivesSent = new Dictionary<string, bool>();
-        private bool emailRamSent;
+        private bool emailRAMSent;
         private bool emailCPUSent;
         private bool emailNetworkSent;
         
@@ -57,12 +49,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         private DriveInfo[] allDrives = DriveInfo.GetDrives();
 
         private bool firstValueUsed;
-        private float firstValue;
         private int cpuIndex;
         private int aboveThresholdTimer;
         float[] cpuValues = new float[10];
-
-
 
         public ServerMonitorsService(IServiceProvider serviceProvider, ILogService logService, ILogger<ServerMonitorsService> logger)
         {
@@ -155,21 +144,19 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 double percentage = freeSpace / fullSpace * 100;
                 //Set the right values for the email.
 
-
                 //Set the email settings correctly
                 receiver = monitorItem.EmailAddressForWarning;
-                subject = "Low disk space";
-                body = $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}";
+                subject = $"Low space on Drive {drive.Name}";
+                body = $"Drive {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}";
 
-
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Drive {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
                 //Check if the threshold is higher then the free space available.
                 if (percentage < threshold)
                 {
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Drive {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
-                    //Only send an email if the disk threshold hasn't already been reached.
+                    //Only send an email if the Drive threshold hasn't already been reached.
                     if (!emailDrivesSent[drive.Name])
                     {
                         emailDrivesSent[drive.Name] = true;
@@ -188,10 +175,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         public async Task GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName, string driveName)
         {
             DriveInfo drive = new DriveInfo(driveName);
-            //Set the email settings correctly
-            receiver = monitorItem.EmailAddressForWarning;
-            subject = "Low disk space";
-            body = $"Disk {drive.Name} is low on space:";
 
             if (!emailDrivesSent.ContainsKey(drive.Name))
             {
@@ -202,17 +185,20 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             double freeSpace = drive.TotalFreeSpace;
             double fullSpace = drive.TotalSize;
             double percentage = freeSpace / fullSpace * 100;
-            //Set the right values for the email.
 
+            //Set the email settings correctly
+            receiver = monitorItem.EmailAddressForWarning;
+            subject = $"Low space on Drive {drive.Name}";
+            body = $"Drive {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}";
 
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Drive {drive} has {drive.TotalFreeSpace}Bytes of free space", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
             //Check if the threshold is higher then the free space available.
             if (percentage < threshold)
             {
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Disk {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Drive {drive.Name} only has {percentage}% space left, this is below the threshold of {threshold}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
-                //Only send an email if the disk threshold hasn't already been reached.
+                //Only send an email if the Drive threshold hasn't already been reached.
                 if (!emailDrivesSent[drive.Name])
                 {
                     emailDrivesSent[drive.Name] = true;
@@ -238,15 +224,15 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             //Check if the ram is above the threshold.
             if (ramValue < threshold)
             {
-                if (!emailRamSent)
+                if (!emailRAMSent)
                 {
-                    emailRamSent = true;
+                    emailRAMSent = true;
                     await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
                 }
             }
             else
             {
-                emailRamSent = false;
+                emailRAMSent = false;
             }
         }
 
@@ -263,14 +249,13 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             }
         }
 
-
         public async Task GetCpuUsageArrayCountAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
         {
             //the first value of performance counter will always be 0.
             if (!firstValueUsed)
             {
                 firstValueUsed = true;
-                firstValue = cpuCounter.NextValue();
+                float firstValue = cpuCounter.NextValue();
             }
             float count = 0;
             float realvalue = cpuCounter.NextValue();
@@ -286,11 +271,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             subject = "CPU usage too high.";
             body = $"The CPU usage is above {threshold}.";
 
-
             //Counts how many values inside the array are above the threshold and adds them to the count
             count = cpuValues.Count(val => val > threshold);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Array count is: {count}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
-
 
             if (count >= arrayCountThreshold)
             {
@@ -312,10 +295,11 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             if (!firstValueUsed)
             {
                 firstValueUsed = true;
-                firstValue = cpuCounter.NextValue();
+                float firstValue = cpuCounter.NextValue();
             }
             float realvalue = cpuCounter.NextValue();
 
+            //Set the email settings correctly.
             receiver = monitorItem.EmailAddressForWarning;
             subject = "CPU usage too high.";
             body = $"The CPU usage has been above the threshold for {aboveThresholdTimer} runs.";
@@ -348,7 +332,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         {
             string networkInterfaceName = monitorItem.NetworkInterfaceName;
 
-
             const int numberOfIterations = 10;
 
             PerformanceCounter bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);
@@ -372,7 +355,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             double utilization = (8 * (dataSent + dataReceived)) / (bandwidth * numberOfIterations) * 100;
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Network utilization: {utilization}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
-
+            //Set the email settings correctly.
             receiver = monitorItem.EmailAddressForWarning;
             subject = "High network utilization.";
             body = $"Your network utilization is {utilization} which is above the threshold of {threshold}.";
