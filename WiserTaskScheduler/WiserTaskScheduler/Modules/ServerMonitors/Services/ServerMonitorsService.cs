@@ -238,6 +238,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         public async Task GetCpuUsageAsync(ServerMonitorModel monitorItem, int threshold, CommunicationsService gclCommunicationsService, string configurationServiceName)
         {
+            //gets the detection type of cpu usage to use.
             switch(monitorItem.CpuUsageDetectionType)
             {
                 case CpuUsageDetectionTypes.ArrayCount:
@@ -267,6 +268,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             //so then it loops through the array the whole time.
             cpuIndex = (cpuIndex + 1) % 10;
 
+            //Set the email settings correctly.
             receiver = monitorItem.EmailAddressForWarning;
             subject = "CPU usage too high.";
             body = $"The CPU usage is above {threshold}.";
@@ -275,6 +277,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             count = cpuValues.Count(val => val > threshold);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Array count is: {count}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
+            
             if (count >= arrayCountThreshold)
             {
                 if (!emailCPUSent)
@@ -305,6 +308,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             body = $"The CPU usage has been above the threshold for {aboveThresholdTimer} runs.";
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"CPU is: {realvalue}%", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
+            //Checks if the value is above the threshold and if so then adds 1 to the counter.
+            //If the value is below the threshold then reset the counter to 0.
             if (realvalue > threshold)
             {
                 aboveThresholdTimer++;
@@ -334,10 +339,10 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
             const int numberOfIterations = 10;
 
+            //get the correct types of the performancecounter class
             PerformanceCounter bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);
             float bandwidth = bandwidthCounter.NextValue();
             PerformanceCounter dataSentCounter = new PerformanceCounter("Network Interface", "Bytes Sent/sec", networkInterfaceName);
-
             PerformanceCounter dataReceivedCounter = new PerformanceCounter("Network Interface", "Bytes Received/sec", networkInterfaceName);
 
             float sendSum = 0;
@@ -350,7 +355,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             }
             float dataSent = sendSum;
             float dataReceived = receiveSum;
-
 
             double utilization = (8 * (dataSent + dataReceived)) / (bandwidth * numberOfIterations) * 100;
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Network utilization: {utilization}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
