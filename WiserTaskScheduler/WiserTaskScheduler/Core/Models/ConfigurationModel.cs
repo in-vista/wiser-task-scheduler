@@ -196,12 +196,12 @@ namespace WiserTaskScheduler.Core.Models
         [XmlArray("ServerMonitors")]
         [XmlArrayItem(typeof(ServerMonitorModel))]
         public ServerMonitorModel[] ServerMonitorsGroup { get; set; }
+
         /// <summary>
         /// Gets or sets the Server Monitors that have been placed outside the group
         /// </summary>
         [XmlElement("ServerMonitor")]
         public ServerMonitorModel[] ServerMonitor { get; set; }
-
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.
