@@ -108,6 +108,7 @@ public class UpdateService : IUpdateService
         switch (updateState)
         {
             case UpdateStates.UpToDate:
+                logger.LogInformation($"WTS '{wts.ServiceName}' is up-to-date.");
                 return;
             case UpdateStates.BreakingChanges:
                 logger.LogWarning($"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.");
