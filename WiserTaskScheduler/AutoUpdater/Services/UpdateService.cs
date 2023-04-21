@@ -5,8 +5,8 @@ using System.ServiceProcess;
 using AutoUpdater.Enums;
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
+using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Communication.Models;
-using HelperLibrary;
 using Microsoft.Extensions.Options;
 
 namespace AutoUpdater.Services;
@@ -293,7 +293,7 @@ public class UpdateService : IUpdateService
         }
         
         var scope = serviceProvider.CreateScope();
-        var communicationsService = GclServicesHelper.GetCommunicationsService(scope, null);
+        var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
         var receivers = new List<CommunicationReceiverModel>();
 
         foreach (var emailAddress in receiver.Split(';'))
