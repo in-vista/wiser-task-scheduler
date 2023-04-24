@@ -4,7 +4,7 @@ The Wiser Task scheduler (WTS in short) is a .net core service which can be used
 ## Prerequisites
 [.NET Desktop runtime 7](https://dotnet.microsoft.com/en-us/download/dotnet/7.0) (x64) needs to be installed on the server
 
-#Installation on a Windows server
+# Installation on a Windows server
 1. Build the project (**not** as single file)
 2. Copy all build files to the desired folder on the server
 3. Setup the Appsettings.json file (see documentation)
