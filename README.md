@@ -58,3 +58,37 @@ If the auto updater is not used or if the auto updater has indicated that a manu
 7. **Only at release**: Place all files **EXCLUDING** appsettings in a zip file called "Update.zip" and place it in the "Update" folder;
 8. **Only at release**: Update the "version.json" file in the "Update" folder;
 9. **Only at release**: Merge to main.
+
+## Setup secrets<a name="setup-secrets"></a>
+1. Create a file named `wts-appsettings-secrets.json` somewhere outside of the project directory.
+1. Open `appSettings.[Environment].json` in the project and save the directory to the secrets in the property `Wts.SecretsBaseDirectory`. When running Wiser Task Scheduler locally on your PC, you need the file `appSettings.Development.json`. Please note that this directory should always end with a slash. Example: `Z:\AppSettings\WiserDemo\`.
+1. The `wts-appsettings-secrets.json` file should look like this:
+### Example
+```json
+{
+	"GCL": {
+		"DefaultEncryptionKey": "", // Optional: The encryption key to use to encrypt/decrypt OAuth information in the database. Only needed if one is present.
+		"ConnectionString": "", // Mandatory: The connectionstring to the database to write logs and service information.
+		"SmtpSettings": null // Optional: Information to send emails if one is provided in "ServiceFailedNotificationEmails"
+	},
+	"Wts": {
+		"Wiser": { // Optional: Only needed if no local configuration has been provided.
+			"Username": "", // Mandatory: The username of a Wiser user to retrieve the configurations.
+			"Password": "", // Mandatory: The password of the Wiser user.
+			"Subdomain": "", // Mandatory: The subdomain on which the Wiser customer is running.
+			"WiserApiUrl": "", // Mandatory: The URL to the Wiser API that needs to be used.
+			"ClientId": "wiser",
+			"ClientSecret" : "", // Mandatory: The client secret the API is expecting.
+			"TestEnvironment": false,
+			"ConfigurationPath": "settings" // Mandatory: The path to the folder that contains the services this WTS needs to execute.
+		},
+		"SlackSettings": null, // Optional: Settings to send error messages to a Slack channel.
+		"ServiceFailedNotificationEmails": "", // Optional: Emailsadresses, semicolon splitted, to notify if errors occured outside of the runs.
+		"Credentials": { // Optional: Key value pair to use as replacements in configurations using [{Credential:<key>}]
+			"ApiKey": "ABCD1234",
+			"DatabaseUser": "User",
+			"DatabasePassword": "P@55w0rd"
+		}
+	}
+}
+```
