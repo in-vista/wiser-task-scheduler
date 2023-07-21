@@ -1034,6 +1034,13 @@ LIMIT 1";
                                     continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalItemId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newItemId;
 
@@ -1200,6 +1207,13 @@ WHERE id = ?itemId";
 
                                     originalLinkId = Convert.ToUInt64(getLinkIdDataTable.Rows[0]["id"]);
                                     linkId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
+                                }
+
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalLinkId.Value))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
                                 }
 
                                 sqlParameters["newId"] = linkId;
@@ -1449,8 +1463,16 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                         continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 var newEntityId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newEntityId;
+                                sqlParameters["guid"] = Guid.NewGuid().ToString("N");
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
@@ -1460,6 +1482,13 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                     productionCommand.CommandText = $@"{queryPrefix}
 INSERT INTO `{tableName}` (id, `name`) 
 VALUES (?newId, '')";
+                                }
+                                else if (tableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // The table wiser_entityproperty has a unique index on (entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
+                                    productionCommand.CommandText = $@"{queryPrefix}
+INSERT INTO `{tableName}` (id, `entity_name`, `property_name`) 
+VALUES (?newId, 'temp_wts', ?guid)";
                                 }
                                 else
                                 {
