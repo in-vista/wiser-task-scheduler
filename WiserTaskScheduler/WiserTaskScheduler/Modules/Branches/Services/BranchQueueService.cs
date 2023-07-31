@@ -72,7 +72,6 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
             var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
             var taskAlertsService = scope.ServiceProvider.GetRequiredService<ITaskAlertsService>();
-
             var branchQueue = (BranchQueueModel) action;
 
             // Make sure we connect to the correct database.
@@ -100,6 +99,9 @@ ORDER BY start_on ASC, id ASC");
                         break;
                     case "merge":
                         results.Add(await HandleMergeBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, taskAlertsService));
+                        break;
+                    case "delete":
+                        results.Add(await HandleDeleteBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService));
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(branchAction), branchAction);
@@ -493,7 +495,6 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
                             query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
-
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
@@ -517,7 +518,6 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                             // Replace the definer with the current user, so that the stored procedure can be created by the current user.
                             query = query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER");
-
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
@@ -530,6 +530,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                 // Rollback transaction if started
                 await databaseConnection.RollbackTransactionAsync(false);
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to create the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
                 // Save the error in the queue and set the finished on datetime to now.
                 await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
@@ -537,10 +538,19 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 // Drop the new database it something went wrong, so that we can start over again later.
                 // We can safely do this, because this method will return an error if the database already exists,
                 // so we can be sure that this database was created here and we can drop it again it something went wrong.
-                if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
+                try
                 {
-                    await databaseHelpersService.DropDatabaseAsync(branchDatabase);
+                    if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
+                    {
+                        await databaseHelpersService.DropDatabaseAsync(branchDatabase);
+                    }
                 }
+                catch (Exception innerException)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to drop new branch database '{settings.DatabaseName}', after getting an error while trying to fill it with data. Error: {innerException}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                }
+
+                error = exception.ToString();
             }
 
             // Set the finish time to the current datetime, so that we can see how long it took.
@@ -588,6 +598,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
             {
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 errors.Add($"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
+
 
                 await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
                 return result;
@@ -1034,6 +1045,13 @@ LIMIT 1";
                                     continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalItemId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newItemId;
 
@@ -1200,6 +1218,13 @@ WHERE id = ?itemId";
 
                                     originalLinkId = Convert.ToUInt64(getLinkIdDataTable.Rows[0]["id"]);
                                     linkId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
+                                }
+
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalLinkId.Value))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
                                 }
 
                                 sqlParameters["newId"] = linkId;
@@ -1449,8 +1474,16 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                         continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 var newEntityId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newEntityId;
+                                sqlParameters["guid"] = Guid.NewGuid().ToString("N");
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
@@ -1460,6 +1493,13 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                     productionCommand.CommandText = $@"{queryPrefix}
 INSERT INTO `{tableName}` (id, `name`) 
 VALUES (?newId, '')";
+                                }
+                                else if (tableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // The table wiser_entityproperty has a unique index on (entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
+                                    productionCommand.CommandText = $@"{queryPrefix}
+INSERT INTO `{tableName}` (id, `entity_name`, `property_name`) 
+VALUES (?newId, 'temp_wts', ?guid)";
                                 }
                                 else
                                 {
@@ -1617,6 +1657,7 @@ WHERE `id` = ?id";
             }
             catch (Exception exception)
             {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to merge the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 errors.Add(exception.ToString());
             }
             finally
@@ -1662,7 +1703,7 @@ WHERE `id` = ?id";
                 }
                 catch (Exception exception)
                 {
-                    logger.LogWarning(exception, $"Dropping the branch database '{branchDatabase}' failed after successful merge.");
+                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Dropping the branch database '{branchDatabase}' failed after succesful merge. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                     errors.Add($"Het verwijderen van de branch is niet gelukt: {exception}");
                 }
             }
@@ -1724,6 +1765,98 @@ WHERE `id` = ?id";
 
             await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
             await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
+        }
+
+        /// <summary>
+        /// Handles the merging of changes from a branch back into the main/original branch.
+        /// This will only merge the changes that the user requested to be merged.
+        /// </summary>
+        /// <param name="dataRowWithSettings">The <see cref="DataRow"/> from wiser_branch_queue.</param>
+        /// <param name="branchQueue">The <see cref="BranchQueueModel"/> with the settings from the XML configuration.</param>
+        /// <param name="configurationServiceName">The name of the configuration.</param>
+        /// <param name="databaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the database.</param>
+        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> for checking if a table exists, creating new tables etc.</param>
+        /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> for getting settings of entity types and for (un)deleting items.</param>
+        /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
+        /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
+        private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService)
+        {
+            var error = "";
+            var result = new JObject();
+
+            // Set the start date to the current datetime.
+            var queueId = dataRowWithSettings.Field<int>("id");
+            databaseConnection.AddParameter("queueId", queueId);
+            databaseConnection.AddParameter("now", DateTime.Now);
+            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
+
+            // Get and validate the settings.
+            var settings = JsonConvert.DeserializeObject<BranchActionBaseModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
+            if (String.IsNullOrWhiteSpace(settings?.DatabaseName))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to delete a branch, but it either had invalid settings, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+
+                error = "Trying to delete a branch, but it either had invalid settings, or the database name was empty.";
+                result.Add("ErrorMessage", error);
+                result.Add("Success", false);
+                databaseConnection.AddParameter("now", DateTime.Now);
+                databaseConnection.AddParameter("error", error);
+                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+                return result;
+            }
+
+            // If the database to be deleted is the same as the currently connected database, then it's most likely the main branch, so stop the deletion.
+            if (databaseConnection.ConnectedDatabase == settings.DatabaseName)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to delete a branch, but it looks to be the main branch and for safety reasons we don't allow the main branch to be deleted. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+
+                error = "Trying to delete a branch, but it looks to be the main branch and for safety reasons we don't allow the main branch to be deleted.";
+                result.Add("ErrorMessage", error);
+                result.Add("Success", false);
+                databaseConnection.AddParameter("now", DateTime.Now);
+                databaseConnection.AddParameter("error", error);
+                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+                return result;
+            }
+
+            // The name of the branch database is always prefixed with the name of the main branch database.
+            // If that is not the case, then we're trying to delete a branch of a different tenant, so stop the deletion.
+            if (!settings.DatabaseName.StartsWith(databaseConnection.ConnectedDatabase))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to delete a branch, but it looks like this branch does not belong to the customer that this WTS is connected to. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+
+                error = "Trying to delete a branch, but it looks like this branch does not belong to the customer that this WTS is connected to.";
+                result.Add("ErrorMessage", error);
+                result.Add("Success", false);
+                databaseConnection.AddParameter("now", DateTime.Now);
+                databaseConnection.AddParameter("error", error);
+                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+                return result;
+            }
+
+            try
+            {
+                // Delete the database, if it exists.
+                if (await databaseHelpersService.DatabaseExistsAsync(settings.DatabaseName))
+                {
+                    await databaseHelpersService.DropDatabaseAsync(settings.DatabaseName);
+                }
+            }
+            catch (Exception exception)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to delete the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                error = exception.ToString();
+            }
+
+            // Set the finish time to the current datetime, so that we can see how long it took.
+            databaseConnection.AddParameter("queueId", queueId); // Set the queue ID again because if a data selector is used the parameters are cleared.
+            databaseConnection.AddParameter("now", DateTime.Now);
+            databaseConnection.AddParameter("error", error);
+            databaseConnection.AddParameter("success", String.IsNullOrWhiteSpace(error));
+            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = ?success, errors = ?error WHERE id = ?queueId");
+            result.Add("ErrorMessage", error);
+            result.Add("Success", String.IsNullOrWhiteSpace(error));
+            return result;
         }
 
         /// <summary>
