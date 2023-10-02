@@ -1424,7 +1424,7 @@ VALUES (?newId, ?fileItemId)";
                                     AddParametersToCommand(sqlParameters, productionCommand);
                                     productionCommand.CommandText = $@"{queryPrefix}
 UPDATE `{tableName}`
-SET content = ?content
+SET content = ?contents
 WHERE id = ?fileId";
                                     await productionCommand.ExecuteNonQueryAsync();
                                 }
