@@ -224,7 +224,7 @@ ORDER BY TABLE_NAME ASC";
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
                             var tableName = dataRow.Field<string>("TABLE_NAME");
-                            
+
                             // Check if the structure of the table is excluded from the creation of the branch.
                             if (branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
                                                                 (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
@@ -929,6 +929,11 @@ LIMIT 1";
                                 var fileDataTable = new DataTable();
                                 using var adapter = new MySqlDataAdapter(branchCommand);
                                 await adapter.FillAsync(fileDataTable);
+                                if (fileDataTable.Rows.Count == 0)
+                                {
+                                    continue;
+                                }
+
                                 itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
                                 originalItemId = itemId;
                                 linkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
@@ -1379,7 +1384,7 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 productionCommand.CommandText = $@"{queryPrefix}
 INSERT INTO `{tableName}` (id, `{oldValue.ToMySqlSafeValue(false)}`) 
 VALUES (?newId, ?fileItemId)";
-                                await productionCommand.ExecuteReaderAsync();
+                                await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
                                 await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection);
@@ -1453,7 +1458,7 @@ WHERE id = ?fileId";
                                 productionCommand.CommandText = $@"{queryPrefix}
 DELETE FROM `{tableName}`
 WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
-                                await productionCommand.ExecuteReaderAsync();
+                                await productionCommand.ExecuteNonQueryAsync();
 
                                 break;
                             }
