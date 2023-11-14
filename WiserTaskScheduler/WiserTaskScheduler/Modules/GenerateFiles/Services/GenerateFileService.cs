@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using EvoPdf;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -13,6 +15,7 @@ using GeeksCoreLibrary.Modules.ItemFiles;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -33,6 +36,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         private readonly ILogService logService;
         private readonly ILogger<GenerateFileService> logger;
         private readonly IServiceProvider serviceProvider;
+        private readonly GclSettings gclSettings;
 
         /// <summary>
         /// Create a new instance of <see cref="GenerateFileService"/>.
@@ -41,12 +45,14 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="logService"></param>
         /// <param name="logger"></param>
         /// <param name="serviceProvider"></param>
-        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider)
+        /// <param name="gclSettings"></param>
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
         {
             this.bodyService = bodyService;
             this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
+            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
@@ -124,6 +130,12 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 itemId =  ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+                
+                foreach (var pdf in generateFile.Body.MergePdfs)
+                {
+                    var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
+                    pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                }
             }
 
             var logLocation = !String.IsNullOrEmpty(fileLocation) ? $"'{fileLocation}'" : $"wiser_itemfile property '{propertyName}', item_id '{itemId}', itemlink_id '{itemLinkId}'";
@@ -141,6 +153,41 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                     Html = body
                 };
                 pdfFile = await htmlToPdfConverterService.ConvertHtmlStringToPdfAsync(pdfSettings);
+                
+                // Merge PDF's to generated PDF
+                if (generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
+                {
+                    // Make stream of byte array
+                    using var stream = new MemoryStream(pdfFile.FileContents);
+
+                    //  Create the merge result PDF document
+                    var mergeResultPdfDocument = new Document(stream);    
+                        
+                    // Automatically close the merged documents when the document resulted after merge is closed
+                    mergeResultPdfDocument.AutoCloseAppendedDocs = true;
+
+                    // Set license key received after purchase to use the converter in licensed mode
+                    // Leave it not set to use the converter in demo mode
+                    mergeResultPdfDocument.LicenseKey = gclSettings.EvoPdfLicenseKey;
+                    
+                    // Get WiserItemsService. It's needed to get the template.
+                    var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+
+                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    {
+                        if (String.IsNullOrEmpty(pdf.WiserItemId))
+                        {
+                            continue;
+                        }
+
+                        var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
+                        mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
+                    }
+
+                    using var saveStream = new MemoryStream();
+                    mergeResultPdfDocument.Save(saveStream);
+                    pdfFile.FileContents = saveStream.ToArray();
+                }
             }
 
             var fileGenerated = false;
