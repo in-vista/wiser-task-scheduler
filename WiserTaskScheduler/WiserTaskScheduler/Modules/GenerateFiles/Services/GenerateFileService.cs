@@ -157,8 +157,8 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 };
                 pdfFile = await htmlToPdfConverterService.ConvertHtmlStringToPdfAsync(pdfSettings);
                 
-                // Merge PDF's to generated PDF
-                if (generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
+                // Merge PDFs to generated PDF
+                if (generateFile.Body.MergePdfs != null && generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
                 {
                     // Make stream of byte array
                     using var stream = new MemoryStream(pdfFile.FileContents);
