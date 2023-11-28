@@ -224,14 +224,13 @@ ORDER BY TABLE_NAME ASC";
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
                             var tableName = dataRow.Field<string>("TABLE_NAME");
-                            
+
                             // Check if the structure of the table is excluded from the creation of the branch.
-                            if (branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
-                                                                (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                                || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                            )))
+                            if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                                                                                                         (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
                             {
                                 continue;
                             }
@@ -447,7 +446,10 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                         {
                             await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id
+UNION ALL
+SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
                         }
 
                         continue;
@@ -463,11 +465,10 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                     }
 
                     // Don't copy data from tables that have specific rules. Either the table needs to stay empty or it does not exist in the new branch.
-                    if (branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                       || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                   ))
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
                     }
@@ -929,6 +930,11 @@ LIMIT 1";
                                 var fileDataTable = new DataTable();
                                 using var adapter = new MySqlDataAdapter(branchCommand);
                                 await adapter.FillAsync(fileDataTable);
+                                if (fileDataTable.Rows.Count == 0)
+                                {
+                                    continue;
+                                }
+
                                 itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
                                 originalItemId = itemId;
                                 linkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
@@ -1379,7 +1385,7 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 productionCommand.CommandText = $@"{queryPrefix}
 INSERT INTO `{tableName}` (id, `{oldValue.ToMySqlSafeValue(false)}`) 
 VALUES (?newId, ?fileItemId)";
-                                await productionCommand.ExecuteReaderAsync();
+                                await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
                                 await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection);
@@ -1419,7 +1425,7 @@ VALUES (?newId, ?fileItemId)";
                                     AddParametersToCommand(sqlParameters, productionCommand);
                                     productionCommand.CommandText = $@"{queryPrefix}
 UPDATE `{tableName}`
-SET content = ?content
+SET content = ?contents
 WHERE id = ?fileId";
                                     await productionCommand.ExecuteNonQueryAsync();
                                 }
@@ -1453,7 +1459,7 @@ WHERE id = ?fileId";
                                 productionCommand.CommandText = $@"{queryPrefix}
 DELETE FROM `{tableName}`
 WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
-                                await productionCommand.ExecuteReaderAsync();
+                                await productionCommand.ExecuteNonQueryAsync();
 
                                 break;
                             }
