@@ -581,8 +581,8 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                             var subDataTable = await databaseConnection.GetAsync(query);
                             query = subDataTable.Rows[0].Field<string>(2);
 
-                            // Replace the definer with the current user, so that the stored procedure can be created by the current user.
-                            query = query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER");
+                            // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
+                            query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
