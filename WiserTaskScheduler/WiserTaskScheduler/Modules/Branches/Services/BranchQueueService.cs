@@ -102,7 +102,7 @@ ORDER BY start_on ASC, id ASC");
                         results.Add(await HandleMergeBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, taskAlertsService));
                         break;
                     case "delete":
-                        results.Add(await HandleDeleteBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService));
+                        results.Add(await HandleDeleteBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, taskAlertsService));
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(branchAction), branchAction);
@@ -465,7 +465,7 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                             await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
 JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
-                            
+
                             // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
                             var entityTypesInTable = await databaseConnection.GetAsync($"SELECT DISTINCT entity_type FROM {prefix}{WiserTableNames.WiserItem} WHERE entity_type <> ''");
                             if (entityTypesInTable.Rows.Count > 0)
@@ -483,7 +483,7 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                                         {
                                             continue;
                                         }
-                                        
+
                                         await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
 JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
@@ -492,6 +492,13 @@ JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON
                                     }
                                 }
                             }
+                        }
+                        else if (await databaseHelpersService.TableExistsAsync($"{prefix}{WiserTableNames.WiserItemLink}"))
+                        {
+                            // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
+                            await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
+SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
                         }
 
                         continue;
@@ -711,8 +718,8 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                 sqlParameters.Add("username", username);
 
-                // Make a list of items that have been created and deleted in this branch, so that can just skip them when we're synchronising to keep the history of the production clean.
-                var itemsCreatedInBranch = new List<ItemCreatedInBranchModel>();
+                // Make a list of objects that have been created and deleted in this branch, so that can just skip them when we're synchronising to keep the history of the production clean.
+                var objectsCreatedInBranch = new List<ObjectCreatedInBranchModel>();
 
                 // We need to lock all tables we're going to use, to make sure no other changes can be done while we're busy synchronising.
                 var tablesToLock = new List<string> {WiserTableNames.WiserHistory};
@@ -740,32 +747,8 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                         tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
                     }
 
-                    var item = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == originalItemId);
                     var action = dataRow.Field<string>("action").ToUpperInvariant();
-                    switch (action)
-                    {
-                        case "CREATE_ITEM":
-                            if (item == null)
-                            {
-                                itemsCreatedInBranch.Add(new ItemCreatedInBranchModel {ItemId = originalItemId});
-                            }
-
-                            break;
-                        case "DELETE_ITEM":
-                            if (item != null)
-                            {
-                                item.AlsoDeleted = true;
-                            }
-
-                            break;
-                        case "UNDELETE_ITEM":
-                            if (item != null)
-                            {
-                                item.AlsoUndeleted = true;
-                            }
-
-                            break;
-                    }
+                    BranchesHelpers.TrackObjectAction(objectsCreatedInBranch, action, originalItemId, tableName);
                 }
 
                 tablesToLock = tablesToLock.Distinct().ToList();
@@ -773,7 +756,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 // Add tables from wiser_id_mappings to tables to lock.
                 await using (var command = branchConnection.CreateCommand())
                 {
-                    command.CommandText = $@"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`";
+                    command.CommandText = $"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`";
                     var mappingDataTable = new DataTable();
                     using var adapter = new MySqlDataAdapter(command);
                     await adapter.FillAsync(mappingDataTable);
@@ -863,6 +846,15 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     var destinationItemId = 0UL;
                     ulong? oldItemId = null;
                     ulong? oldDestinationItemId = null;
+                    (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
+
+                    var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalObjectId && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+                    if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                    {
+                        // This item was created and then deleted in the branch, so we don't need to do anything.
+                        historyItemsSynchronised.Add(historyId);
+                        continue;
+                    }
 
                     try
                     {
@@ -894,18 +886,19 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                     AddParametersToCommand(sqlParameters, branchCommand);
 
                                     // Replace wiser_itemlinkdetail with wiser_itemlink because we need to get the source and destination from [prefix]wiser_itemlink, even if this is an update for [prefix]wiser_itemlinkdetail.
-                                    branchCommand.CommandText = $@"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
+                                    branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
                                     var linkDataTable = new DataTable();
                                     using var branchAdapter = new MySqlDataAdapter(branchCommand);
                                     await branchAdapter.FillAsync(linkDataTable);
                                     if (linkDataTable.Rows.Count == 0)
                                     {
-                                        branchCommand.CommandText = $@"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
+                                        branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
                                         await branchAdapter.FillAsync(linkDataTable);
                                         if (linkDataTable.Rows.Count == 0)
                                         {
                                             // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
                                             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                            historyItemsSynchronised.Add(historyId);
                                             continue;
                                         }
                                     }
@@ -955,6 +948,27 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                 linkId = String.Equals(oldValue, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? UInt64.Parse(newValue) : 0;
                                 originalLinkId = linkId;
 
+                                if (linkId > 0)
+                                {
+                                    sqlParameters["linkId"] = linkId;
+                                    var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
+                                    await using var branchCommand = branchConnection.CreateCommand();
+                                    AddParametersToCommand(sqlParameters, branchCommand);
+                                    branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
+                                    var fileDataTable = new DataTable();
+                                    using var adapter = new MySqlDataAdapter(branchCommand);
+                                    await adapter.FillAsync(fileDataTable);
+                                    if (fileDataTable.Rows.Count == 0)
+                                    {
+                                        historyItemsSynchronised.Add(historyId);
+                                        continue;
+                                    }
+
+                                    itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+                                    destinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
+                                    linkType = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
+                                }
+
                                 break;
                             }
                             case "UPDATE_FILE":
@@ -974,6 +988,7 @@ LIMIT 1";
                                 await adapter.FillAsync(fileDataTable);
                                 if (fileDataTable.Rows.Count == 0)
                                 {
+                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1001,19 +1016,18 @@ LIMIT 1";
                         linkId = GetMappedId(tableName, idMapping, linkId);
                         fileId = GetMappedId(tableName, idMapping, fileId);
                         objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
-                        var itemCreatedInBranch = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == itemId);
-                        var linkSourceItemCreatedInBranch = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == originalItemId);
-                        var linkDestinationItemCreatedInBranch = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == originalDestinationItemId);
+                        var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
+                        var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
                         // Figure out the entity type of the item that was updated, so that we can check if we need to do anything with it.
                         // We don't want to synchronise certain entity types, such as users, relations and baskets.
-                        if (entityTypes.ContainsKey(itemId))
+                        if (entityTypes.TryGetValue(itemId, out var type))
                         {
-                            entityType = entityTypes[itemId];
+                            entityType = type;
                         }
                         else if (String.IsNullOrWhiteSpace(entityType))
                         {
-                            if (action == "ADD_LINK")
+                            if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0))
                             {
                                 // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -1023,7 +1037,7 @@ LIMIT 1";
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 branchCommand.CommandText = "UNLOCK TABLES";
                                 await branchCommand.ExecuteNonQueryAsync();
-                                var linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection, wiserItemsService);
+                                linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection, wiserItemsService);
                                 if (linkData.HasValue)
                                 {
                                     entityType = linkData.Value.SourceType;
@@ -1041,9 +1055,17 @@ LIMIT 1";
                                     }
                                 }
 
-                                // Lock the tables again when we're done with deleting.
+                                // Lock the tables again when we're done.
                                 await LockTablesAsync(productionConnection, tablesToLock, false);
                                 await LockTablesAsync(branchConnection, tablesToLock, true);
+
+                                // If we couldn't find any link data, then most likely one of the items doesn't exist anymore, so skip this history record.
+                                // The other reason could be that the link type is not configured (correctly), in that case we also can't do anything, so skip it as well.
+                                if (!linkData.HasValue)
+                                {
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
                             }
                             else
                             {
@@ -1052,13 +1074,6 @@ LIMIT 1";
 
                                 if (isWiserItemChange && originalItemId > 0)
                                 {
-                                    if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                    {
-                                        // This item was created and then deleted in the branch, so we don't need to do anything.
-                                        historyItemsSynchronised.Add(historyId);
-                                        continue;
-                                    }
-
                                     sqlParameters["itemId"] = originalItemId;
                                     var itemDataTable = new DataTable();
                                     await using var environmentCommand = branchConnection.CreateCommand();
@@ -1074,6 +1089,7 @@ LIMIT 1";
                                         if (itemDataTable.Rows.Count == 0)
                                         {
                                             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                            historyItemsSynchronised.Add(historyId);
                                             continue;
                                         }
                                     }
@@ -1105,13 +1121,6 @@ LIMIT 1";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Create)
                                 {
-                                    continue;
-                                }
-
-                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1205,13 +1214,6 @@ WHERE id = ?itemId";
                                     continue;
                                 }
 
-                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 // Unlock the tables temporarily so that we can call wiserItemsService.DeleteAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 productionCommand.CommandText = "UNLOCK TABLES";
@@ -1228,13 +1230,6 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Delete)
                                 {
-                                    continue;
-                                }
-
-                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1275,7 +1270,7 @@ WHERE id = ?itemId";
                                 await using (var environmentCommand = branchConnection.CreateCommand())
                                 {
                                     AddParametersToCommand(sqlParameters, environmentCommand);
-                                    environmentCommand.CommandText = $@"SELECT id FROM `{tableName}` WHERE item_id = ?originalItemId AND destination_item_id = ?originalDestinationItemId AND type = ?type";
+                                    environmentCommand.CommandText = $"SELECT id FROM `{tableName}` WHERE item_id = ?originalItemId AND destination_item_id = ?originalDestinationItemId AND type = ?type";
                                     var getLinkIdDataTable = new DataTable();
                                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
                                     await environmentAdapter.FillAsync(getLinkIdDataTable);
@@ -1375,6 +1370,13 @@ AND type = ?type";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    continue;
+                                }
+
+                                if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                                {
+                                    // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
+                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1854,15 +1856,18 @@ WHERE `id` = ?id";
         /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> for getting settings of entity types and for (un)deleting items.</param>
         /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
-        private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService)
+        private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ITaskAlertsService taskAlertsService)
         {
             var error = "";
             var result = new JObject();
+            var startDate = DateTime.Now;
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
 
             // Set the start date to the current datetime.
             var queueId = dataRowWithSettings.Field<int>("id");
             databaseConnection.AddParameter("queueId", queueId);
-            databaseConnection.AddParameter("now", DateTime.Now);
+            databaseConnection.AddParameter("now", startDate);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
 
             // Get and validate the settings.
@@ -1874,9 +1879,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it either had invalid settings, or the database name was empty.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1888,9 +1892,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it looks to be the main branch and for safety reasons we don't allow the main branch to be deleted.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1903,9 +1906,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it looks like this branch does not belong to the customer that this WTS is connected to.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1924,11 +1926,7 @@ WHERE `id` = ?id";
             }
 
             // Set the finish time to the current datetime, so that we can see how long it took.
-            databaseConnection.AddParameter("queueId", queueId); // Set the queue ID again because if a data selector is used the parameters are cleared.
-            databaseConnection.AddParameter("now", DateTime.Now);
-            databaseConnection.AddParameter("error", error);
-            databaseConnection.AddParameter("success", String.IsNullOrWhiteSpace(error));
-            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = ?success, errors = ?error WHERE id = ?queueId");
+            await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
             result.Add("ErrorMessage", error);
             result.Add("Success", String.IsNullOrWhiteSpace(error));
             return result;
