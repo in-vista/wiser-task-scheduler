@@ -350,7 +350,7 @@ namespace WiserTaskScheduler.Core.Services
 
             try
             {
-                await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
+                await worker.InitializeAsync(configuration, $"{configuration.ServiceName}", runScheme, singleRun);
                 
                 // If there is no action to be performed the thread can be closed.
                 if (!worker.HasAction)
