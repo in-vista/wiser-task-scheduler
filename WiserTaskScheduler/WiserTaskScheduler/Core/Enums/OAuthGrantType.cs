@@ -7,6 +7,7 @@
 		AuthCodeWithPKCE,
 		Implicit,
 		PasswordCredentials,
-		ClientCredentials
+		ClientCredentials,
+		RefreshToken
     }
 }
