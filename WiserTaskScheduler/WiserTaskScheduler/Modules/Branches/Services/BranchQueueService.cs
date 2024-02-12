@@ -1797,7 +1797,7 @@ WHERE `id` = ?id";
             branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
             var fileDataTable = new DataTable();
             using var adapter = new MySqlDataAdapter(branchCommand);
-            await adapter.FillAsync(fileDataTable);
+            adapter.Fill(fileDataTable);
             return fileDataTable.Rows.Count == 0
                 ? (0, 0, 0)
                 : (Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]), Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]), Convert.ToInt32(fileDataTable.Rows[0]["type"]));
