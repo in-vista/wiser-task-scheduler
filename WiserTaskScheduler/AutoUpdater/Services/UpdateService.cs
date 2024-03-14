@@ -46,7 +46,11 @@ public class UpdateService : IUpdateService
             var versionList = await GetVersionList();
             if (lastDownloadedVersion == null || lastDownloadedVersion != versionList[0].Version)
             {
-                await DownloadUpdate(versionList[0].Version);
+                // If the update failed to download, do not continue with the update.
+                if (!await DownloadUpdate(versionList[0].Version))
+                {
+                    return;
+                }
             }
 
             foreach (var wts in updateSettings.WtsInstancesToUpdate)
@@ -78,7 +82,8 @@ public class UpdateService : IUpdateService
     /// Download the update files to the disk.
     /// </summary>
     /// <param name="version">The version being downloaded.</param>
-    private async Task DownloadUpdate(Version version)
+    /// <returns>Returns true if the update has been downloaded.</returns>
+    private async Task<bool> DownloadUpdate(Version version)
     {
         logger.LogInformation("Download the latest update from the server.");
         
@@ -92,9 +97,16 @@ public class UpdateService : IUpdateService
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{downloadUrl}version{version.ToString()}.zip");
         using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogError($"Failed to download the update for version {version}.");
+            return false;
+        }
+        
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());
-
         lastDownloadedVersion = version;
+        return true;
     }
     
     /// <summary>
@@ -105,10 +117,23 @@ public class UpdateService : IUpdateService
     private void UpdateWts(WtsModel wts, List<VersionModel> versionList)
     {
         logger.LogInformation($"Checking updates for WTS '{wts.ServiceName}'.");
+
+        UpdateStates updateState;
+        var version = new Version(0, 0, 0, 0);
         
-        var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
-        var version = new Version(versionInfo.FileVersion);
-        var updateState = CheckForUpdates(version, versionList);
+        var path = Path.Combine(wts.PathToFolder, WtsExeFile);
+        if (Path.Exists(path))
+        {
+            var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
+            version = new Version(versionInfo.FileVersion);
+            updateState = CheckForUpdates(version, versionList);
+        }
+        else
+        {
+            // If the WTS is not found on the location, it is considered to need to be updated.
+            updateState = UpdateStates.Update;
+            logger.LogWarning($"WTS '{wts.ServiceName}' not found at '{wts.PathToFolder}' so the latest version will be installed.");
+        }
 
         switch (updateState)
         {
@@ -224,10 +249,11 @@ public class UpdateService : IUpdateService
                     return;
                 }
             }
+            
+            logger.LogInformation($"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
 
             if (wts.SendEmailOnUpdateComplete)
             {
-                logger.LogInformation($"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
                 EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Update installed", $"The service for WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.", wts.ServiceName);
             }
         }
@@ -349,7 +375,7 @@ public class UpdateService : IUpdateService
         var communication = new SingleCommunicationModel()
         {
             Receivers =  receivers,
-            Subject = subject,
+            Subject = $"{subject} ({Environment.MachineName})",
             Content = body
         };
 
