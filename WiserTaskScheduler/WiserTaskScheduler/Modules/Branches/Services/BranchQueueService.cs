@@ -61,6 +61,17 @@ namespace WiserTaskScheduler.Modules.Branches.Services
         public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
             connectionString = configuration.ConnectionString;
+            if (connectionString.Contains("IgnoreCommandTransaction", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.CompletedTask;
+            }
+
+            if (!connectionString.EndsWith(";", StringComparison.OrdinalIgnoreCase))
+            {
+                connectionString += ";";
+            }
+
+            connectionString += "IgnoreCommandTransaction=true";
             return Task.CompletedTask;
         }
 
@@ -171,8 +182,13 @@ ORDER BY start_on ASC, id ASC");
 
             try
             {
+                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
+
                 // Some variables we'll need a lot, for easier access.
-                var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
+                var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
+                {
+                    IgnoreCommandTransaction = true
+                };
 
                 // Change connection string to one with a specific user for deleting a database.
                 if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
@@ -567,7 +583,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                     {
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
-                            query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
+                            query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
@@ -654,6 +670,9 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 {"Errors", errors}
             };
 
+            // Make sure the queue table is up-to-date.
+            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
+
             // Set the start date to the current datetime.
             var startDate = DateTime.Now;
             var stopwatch = new Stopwatch();
@@ -670,13 +689,15 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 errors.Add($"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
 
-
                 await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
                 return result;
             }
 
             // Store database names in variables for later use and create connection string for the branch database.
-            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
+            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
+            {
+                IgnoreCommandTransaction = true
+            };
             var originalDatabase = connectionStringBuilder.Database;
             var branchDatabase = settings.DatabaseName;
             connectionStringBuilder.Database = branchDatabase;
@@ -707,8 +728,12 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     environmentAdapter.Fill(dataTable);
                 }
 
-                // Srt saveHistory and username parameters for all queries.
-                var queryPrefix = @"SET @saveHistory = TRUE; SET @_username = ?username; ";
+                var totalItemsInHistory = dataTable.Rows.Count;
+                databaseConnection.AddParameter("totalItems", totalItemsInHistory);
+                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET total_items = ?totalItems, items_processed = 0 WHERE id = ?queueId");
+
+                // Set saveHistory and username parameters for all queries.
+                var queryPrefix = "SET @saveHistory = TRUE; SET @_username = ?username; ";
                 var username = $"{dataRowWithSettings.Field<string>("added_by")} (Sync from {branchDatabase})";
                 if (username.Length > 50)
                 {
@@ -780,15 +805,19 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 await LockTablesAsync(productionConnection, tablesToLock, false);
                 await LockTablesAsync(branchConnection, tablesToLock, true);
 
-                // This is to cache the entity types for all changed items, so that we don't have to execute a query for every changed detail of the same item.
-                var entityTypes = new Dictionary<ulong, string>();
+                // This is to cache some information about items, like the entity type and whether or not the item has been deleted.
+                // By using this, we don't have to look up the entity type of an item multiple times, if an item has multiple changes in the history.
+                // The key is the table prefix and the value is a list with the items that we already looked up.
+                var itemsCache = new Dictionary<string, List<BranchMergeItemCacheModel>>();
+                var filesCache = new Dictionary<string, List<BranchMergeFileCacheModel>>();
+                var linksCache = new List<BranchMergeLinkCacheModel>();
 
                 // This is to map one item ID to another. This is needed because when someone creates a new item in the other environment, that ID could already exist in the production environment.
                 // So we need to map the ID that is saved in wiser_history to the new ID of the item that we create in the production environment.
                 var idMapping = new Dictionary<string, Dictionary<ulong, ulong>>();
                 await using (var environmentCommand = branchConnection.CreateCommand())
                 {
-                    environmentCommand.CommandText = $@"SELECT table_name, our_id, production_id FROM `{WiserTableNames.WiserIdMappings}`";
+                    environmentCommand.CommandText = $"SELECT table_name, our_id, production_id FROM `{WiserTableNames.WiserIdMappings}`";
                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
 
                     var idMappingDatatable = new DataTable();
@@ -810,6 +839,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                 // Start synchronising all history items one by one.
                 var historyItemsSynchronised = new List<ulong>();
+                var itemsProcessed = 0;
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var historyId = Convert.ToUInt64(dataRow["id"]);
@@ -819,6 +849,9 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     if (conflict != null && conflict.AcceptChange.HasValue && !conflict.AcceptChange.Value)
                     {
                         historyItemsSynchronised.Add(historyId);
+                        itemsProcessed++;
+                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
                         continue;
                     }
 
@@ -840,6 +873,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     var entityType = "";
                     int? linkType = null;
                     int? linkOrdering = null;
+                    BranchMergeLinkCacheModel linkCacheData = null;
 
                     // Variables for item link changes.
                     var destinationItemId = 0UL;
@@ -852,7 +886,16 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     {
                         // This item was created and then deleted in the branch, so we don't need to do anything.
                         historyItemsSynchronised.Add(historyId);
+                        itemsProcessed++;
+                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                         continue;
+                    }
+
+                    var (tablePrefix, _) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
+                    if (!itemsCache.TryGetValue(tablePrefix, out var listOfItems))
+                    {
+                        listOfItems = new List<BranchMergeItemCacheModel>();
+                        itemsCache.Add(tablePrefix, listOfItems);
                     }
 
                     try
@@ -878,35 +921,69 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                 // When a link has been changed, it's possible that the ID of one of the items is changed.
                                 // It's also possible that this is a new link that the production database didn't have yet (and so the ID of the link will most likely be different).
                                 // Therefor we need to find the original item and destination IDs, so that we can use those to update the link in the production database.
-                                sqlParameters["linkId"] = itemId;
+                                sqlParameters["linkId"] = linkId;
 
-                                await using (var branchCommand = branchConnection.CreateCommand())
+                                linkCacheData = linksCache.FirstOrDefault(link => link.Id == linkId);
+                                if (linkCacheData != null)
                                 {
-                                    AddParametersToCommand(sqlParameters, branchCommand);
+                                    if (linkCacheData.IsDeleted)
+                                    {
+                                        historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    }
 
-                                    // Replace wiser_itemlinkdetail with wiser_itemlink because we need to get the source and destination from [prefix]wiser_itemlink, even if this is an update for [prefix]wiser_itemlinkdetail.
-                                    branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
-                                    var linkDataTable = new DataTable();
-                                    using var branchAdapter = new MySqlDataAdapter(branchCommand);
+                                    if (linkCacheData.ItemId.HasValue && linkCacheData.DestinationItemId.HasValue && linkCacheData.Type.HasValue)
+                                    {
+                                        itemId = linkCacheData.ItemId.Value;
+                                        originalItemId = itemId;
+                                        destinationItemId = linkCacheData.DestinationItemId.Value;
+                                        linkType = linkCacheData.Type;
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    linkCacheData = new BranchMergeLinkCacheModel
+                                    {
+                                        Id = linkId.Value
+                                    };
+                                    linksCache.Add(linkCacheData);
+                                }
+
+                                await using var branchCommand = branchConnection.CreateCommand();
+                                AddParametersToCommand(sqlParameters, branchCommand);
+
+                                // Replace wiser_itemlinkdetail with wiser_itemlink because we need to get the source and destination from [prefix]wiser_itemlink, even if this is an update for [prefix]wiser_itemlinkdetail.
+                                branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
+                                var linkDataTable = new DataTable();
+                                using var branchAdapter = new MySqlDataAdapter(branchCommand);
+                                branchAdapter.Fill(linkDataTable);
+                                if (linkDataTable.Rows.Count == 0)
+                                {
+                                    branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
                                     branchAdapter.Fill(linkDataTable);
                                     if (linkDataTable.Rows.Count == 0)
                                     {
-                                        branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
-                                        branchAdapter.Fill(linkDataTable);
-                                        if (linkDataTable.Rows.Count == 0)
-                                        {
-                                            // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
-                                            await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                            historyItemsSynchronised.Add(historyId);
-                                            continue;
-                                        }
+                                        // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{linkId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        historyItemsSynchronised.Add(historyId);
+                                        linkCacheData.IsDeleted = true;
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
                                     }
-
-                                    itemId = Convert.ToUInt64(linkDataTable.Rows[0]["item_id"]);
-                                    originalItemId = itemId;
-                                    destinationItemId = Convert.ToUInt64(linkDataTable.Rows[0]["destination_item_id"]);
-                                    linkType = Convert.ToInt32(linkDataTable.Rows[0]["type"]);
                                 }
+
+                                itemId = Convert.ToUInt64(linkDataTable.Rows[0]["item_id"]);
+                                originalItemId = itemId;
+                                destinationItemId = Convert.ToUInt64(linkDataTable.Rows[0]["destination_item_id"]);
+                                linkType = Convert.ToInt32(linkDataTable.Rows[0]["type"]);
+
+                                linkCacheData.Type = linkType.Value;
+                                linkCacheData.ItemId = itemId;
+                                linkCacheData.DestinationItemId = destinationItemId;
 
                                 switch (field)
                                 {
@@ -949,10 +1026,12 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                                 if (linkId > 0)
                                 {
-                                    (itemId, destinationItemId, linkType) = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, historyItemsSynchronised, historyId);
-                                    if (itemId == 0)
+                                    linkCacheData = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, linksCache);
+                                    if (linkCacheData.IsDeleted)
                                     {
                                         historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
                                 }
@@ -964,6 +1043,41 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                 fileId = itemId;
                                 originalFileId = fileId;
                                 sqlParameters["fileId"] = fileId;
+
+                                if (!filesCache.TryGetValue(tablePrefix, out var listOfFiles))
+                                {
+                                    listOfFiles = new List<BranchMergeFileCacheModel>();
+                                    filesCache.Add(tablePrefix, listOfFiles);
+                                }
+
+                                var fileData = listOfFiles.FirstOrDefault(file => file.Id == fileId);
+                                if (fileData != null)
+                                {
+                                    if (fileData.IsDeleted)
+                                    {
+                                        historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    }
+
+                                    if (fileData.ItemId.HasValue && fileData.LinkId.HasValue)
+                                    {
+                                        itemId = fileData.ItemId.Value;
+                                        originalItemId = itemId;
+                                        linkId = fileData.LinkId.Value;
+                                        originalLinkId = linkId;
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    fileData = new BranchMergeFileCacheModel
+                                    {
+                                        Id = fileId.Value
+                                    };
+                                    listOfFiles.Add(fileData);
+                                }
 
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, branchCommand);
@@ -977,6 +1091,9 @@ LIMIT 1";
                                 if (fileDataTable.Rows.Count == 0)
                                 {
                                     historyItemsSynchronised.Add(historyId);
+                                    fileData.IsDeleted = true;
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -987,10 +1104,12 @@ LIMIT 1";
 
                                 if (linkId > 0)
                                 {
-                                    (itemId, destinationItemId, linkType) = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, historyItemsSynchronised, historyId);
-                                    if (itemId == 0)
+                                    linkCacheData = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, linksCache);
+                                    if (linkCacheData.IsDeleted)
                                     {
                                         historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
                                 }
@@ -1017,11 +1136,28 @@ LIMIT 1";
                         var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
                         var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
+                        var (_, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
+                        var itemData = listOfItems.FirstOrDefault(item => item.Id == itemId);
+                        if (itemData == null)
+                        {
+                            itemData = new BranchMergeItemCacheModel {Id = itemId};
+                            listOfItems.Add(itemData);
+                        }
+
+                        // If we already figured out that this item is deleted, then skip it.
+                        if (itemData.IsDeleted)
+                        {
+                            historyItemsSynchronised.Add(historyId);
+                            itemsProcessed++;
+                            await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                            continue;
+                        }
+
                         // Figure out the entity type of the item that was updated, so that we can check if we need to do anything with it.
                         // We don't want to synchronise certain entity types, such as users, relations and baskets.
-                        if (entityTypes.TryGetValue(itemId, out var type))
+                        if (!String.IsNullOrEmpty(itemData.EntityType))
                         {
-                            entityType = type;
+                            entityType = itemData.EntityType;
                         }
                         else if (String.IsNullOrWhiteSpace(entityType))
                         {
@@ -1039,7 +1175,7 @@ LIMIT 1";
                                 if (linkData.HasValue)
                                 {
                                     entityType = linkData.Value.SourceType;
-                                    entityTypes.Add(itemId, entityType);
+                                    itemData.EntityType = entityType;
 
                                     if (!tablesToLock.Contains($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}"))
                                     {
@@ -1062,39 +1198,39 @@ LIMIT 1";
                                 if (!linkData.HasValue)
                                 {
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
                             }
-                            else
+                            else if (isWiserItemChange && originalItemId > 0)
                             {
                                 // Check if this item is saved in a dedicated table with a certain prefix.
-                                var (tablePrefix, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
-
-                                if (isWiserItemChange && originalItemId > 0)
+                                sqlParameters["itemId"] = originalItemId;
+                                var itemDataTable = new DataTable();
+                                await using var environmentCommand = branchConnection.CreateCommand();
+                                AddParametersToCommand(sqlParameters, environmentCommand);
+                                environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}` WHERE id = ?itemId";
+                                using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
+                                environmentAdapter.Fill(itemDataTable);
+                                if (itemDataTable.Rows.Count == 0)
                                 {
-                                    sqlParameters["itemId"] = originalItemId;
-                                    var itemDataTable = new DataTable();
-                                    await using var environmentCommand = branchConnection.CreateCommand();
-                                    AddParametersToCommand(sqlParameters, environmentCommand);
-                                    environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}` WHERE id = ?itemId";
-                                    using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
+                                    // If item doesn't exist, check the archive table, it might have been deleted.
+                                    environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}` WHERE id = ?itemId";
                                     environmentAdapter.Fill(itemDataTable);
                                     if (itemDataTable.Rows.Count == 0)
                                     {
-                                        // If item doesn't exist, check the archive table, it might have been deleted.
-                                        environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}` WHERE id = ?itemId";
-                                        environmentAdapter.Fill(itemDataTable);
-                                        if (itemDataTable.Rows.Count == 0)
-                                        {
-                                            await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                            historyItemsSynchronised.Add(historyId);
-                                            continue;
-                                        }
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        itemData.IsDeleted = true;
+                                        historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
                                     }
-
-                                    entityType = itemDataTable.Rows[0].Field<string>("entity_type");
-                                    entityTypes.Add(itemId, entityType);
                                 }
+
+                                entityType = itemDataTable.Rows[0].Field<string>("entity_type");
+                                itemData.EntityType = entityType;
                             }
                         }
 
@@ -1110,6 +1246,7 @@ LIMIT 1";
                         var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
                         var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
                         var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
+                        var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
 
                         // Update the item in the production environment.
                         switch (action)
@@ -1119,6 +1256,8 @@ LIMIT 1";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Create)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1126,6 +1265,8 @@ LIMIT 1";
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1148,6 +1289,8 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1188,6 +1331,8 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1209,6 +1354,8 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Delete)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1228,6 +1375,8 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Delete)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1247,6 +1396,8 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1254,6 +1405,8 @@ WHERE id = ?itemId";
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1276,6 +1429,8 @@ WHERE id = ?itemId";
                                     {
                                         await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link ID with itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         historyItemsSynchronised.Add(historyId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
 
@@ -1287,6 +1442,8 @@ WHERE id = ?itemId";
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1308,6 +1465,8 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1315,6 +1474,8 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1339,6 +1500,8 @@ AND type = ?type";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1346,6 +1509,8 @@ AND type = ?type";
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1368,6 +1533,8 @@ AND type = ?type";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1375,6 +1542,8 @@ AND type = ?type";
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1414,6 +1583,8 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1421,6 +1592,8 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1446,6 +1619,8 @@ VALUES (?newId, ?fileItemId)";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1498,6 +1673,8 @@ WHERE id = ?fileId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1523,31 +1700,58 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                             case "INSERT_LINK_SETTING":
                             case "INSERT_API_CONNECTION":
                             case "INSERT_ROLE":
+                            case "CREATE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
                                 {
                                     case WiserTableNames.WiserEntity when entityMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserQuery when queryMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserModule when moduleMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserPermission when permissionMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserLink when linkMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                 }
 
@@ -1555,6 +1759,8 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
                                     historyItemsSynchronised.Add(historyId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
 
@@ -1603,31 +1809,58 @@ VALUES (?newId)";
                             case "UPDATE_LINK_SETTING":
                             case "UPDATE_API_CONNECTION":
                             case "UPDATE_ROLE":
+                            case "UPDATE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
                                 {
                                     case WiserTableNames.WiserEntity when entityMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserQuery when queryMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserModule when moduleMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserPermission when permissionMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserLink when linkMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                 }
 
@@ -1655,31 +1888,58 @@ WHERE id = ?id";
                             case "DELETE_LINK_SETTING":
                             case "DELETE_API_CONNECTION":
                             case "DELETE_ROLE":
+                            case "DELETE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
                                 {
                                     case WiserTableNames.WiserEntity when entityMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserQuery when queryMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserModule when moduleMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserPermission when permissionMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserLink when linkMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                 }
 
@@ -1700,6 +1960,8 @@ WHERE `id` = ?id";
 
                         successfulChanges++;
                         historyItemsSynchronised.Add(historyId);
+                        itemsProcessed++;
+                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                     }
                     catch (Exception exception)
                     {
@@ -1707,6 +1969,8 @@ WHERE `id` = ?id";
                         errors.Add($"Het is niet gelukt om de wijziging '{action}' voor item '{originalItemId}' over te zetten. De fout was: {exception.Message}");
                     }
                 }
+
+                await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory);
 
                 try
                 {
@@ -1788,8 +2052,47 @@ WHERE `id` = ?id";
             return result;
         }
 
-        private static async Task<(ulong SourceItemId, ulong DestinationItemId, int LinkType)> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<ulong> historyItemsSynchronised, ulong historyId)
+        /// <summary>
+        /// Update the progress in the queue, so that the we can see how far we are.
+        /// This only updates after every 100 items, so that we don't execute too many queries.
+        /// </summary>
+        /// <param name="databaseConnection">The database connection to the main branch that contains the wiser_branch_queue table.</param>
+        /// <param name="queueId">The ID of the row in the wiser_branch_queue table to update.</param>
+        /// <param name="itemsProcessed">The amount of items that we processed so far.</param>
+        private static async Task UpdateProgressInQueue(IDatabaseConnection databaseConnection, int queueId, int itemsProcessed)
         {
+            // Only update after every 100 records, so that we don't execute too many queries.
+            if (itemsProcessed % 100 != 0)
+            {
+                return;
+            }
+
+            databaseConnection.AddParameter("queueId", queueId);
+            databaseConnection.AddParameter("itemsProcessed", itemsProcessed);
+            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET items_processed = ?itemsProcessed WHERE id = ?queueId");
+        }
+
+        private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache)
+        {
+            var result = new BranchMergeLinkCacheModel { Id = linkId ?? 0 };
+            if (!linkId.HasValue)
+            {
+                return result;
+            }
+
+            var linkData = linksCache.SingleOrDefault(l => l.Id == linkId.Value);
+            switch (linkData)
+            {
+                case {ItemId: not null, DestinationItemId: not null, Type: not null}:
+                    return linkData;
+                case null:
+                    linksCache.Add(result);
+                    break;
+                default:
+                    result = linkData;
+                    break;
+            }
+
             sqlParameters["linkId"] = linkId;
             var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
             await using var branchCommand = branchConnection.CreateCommand();
@@ -1798,9 +2101,16 @@ WHERE `id` = ?id";
             var fileDataTable = new DataTable();
             using var adapter = new MySqlDataAdapter(branchCommand);
             adapter.Fill(fileDataTable);
-            return fileDataTable.Rows.Count == 0
-                ? (0, 0, 0)
-                : (Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]), Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]), Convert.ToInt32(fileDataTable.Rows[0]["type"]));
+            if (fileDataTable.Rows.Count == 0)
+            {
+                result.IsDeleted = true;
+                return result;
+            }
+
+            result.ItemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+            result.DestinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
+            result.Type = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
+            return result;
         }
 
         private static async Task FinishBranchActionAsync(int queueId, DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, ITaskAlertsService taskAlertsService, JArray errors, Stopwatch stopwatch, DateTime startDate, ulong templateId, string defaultMessageSubject, string defaultMessageContent)
