@@ -48,16 +48,17 @@ If the auto updater is not used or if the auto updater has indicated that a manu
 2. Run this command: `sc.exe delete "<Service naam>"`<br>- change `<Service name>` with the correct name of the service
 3. If you want to completely remove the WTS or the Auto Updater then also remove the files from the server 
 
-## Creating a new (release) build
-1. **Only at release**: open `WiserTaskScheduler.csproj` in a text editor and increase the version number at "Version", "AssemblyVersion" and "FileVersion";
+## Creating a new release
+1. Open `WiserTaskScheduler.csproj` in a text editor and increase the version number at "Version", "AssemblyVersion" and "FileVersion";
 2. Start the project in your favorite SDE;
 3. Right click on the project and click "Publish";
 4. Click "Publish WiserTaskScheduler to folder" or "Publish AutoUpdater to folder" (depending on which project to create a new build);
 5. The application will be published in the project folder "bin\Release\net7.0\win-x64\publish\";
 6. Check that all DLL files are present in the publish folder, about 400 files should be present. If these are missing, the application is built as a "Single file" and cannot be started.
-7. **Only at release**: Place all files **EXCLUDING** appsettings in a zip file called "version{version}.zip" (e.g. version1.3.6.0.zip) and upload it to the server that hosts the WTS versions;
-8. **Only at release**: Update the "version.json" file in the "Update" folder;
-9. **Only at release**: Merge to main.
+7. Place all files **EXCLUDING** appsettings in a zip file called "version{version}.zip" (e.g. version1.3.6.0.zip) and upload it to the server that hosts the WTS versions;
+8. Update the "version.json" file in the "Update" folder;
+9. Merge to main;
+10. Create a new release in Github with the tag the version numer (e.g. v1.0.0.0). Auto generate the notes to list all changes for the new version. **Only for WTS releases, not for the auto updater.**
 
 ## Setup secrets<a name="setup-secrets"></a>
 1. Create a file named `wts-appsettings-secrets.json` somewhere outside of the project directory.
