@@ -260,6 +260,19 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                 }
 
                 break;
+            case FtpActionTypes.Move:
+            case FtpActionTypes.Rename:
+                try
+                {
+                    var success = await ftpHandler.MoveFileAsync(fromPath, toPath);
+                    result.Add("Success", success);
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to move file from '{fromPath}' to '{toPath}' due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    result.Add("Success", false);
+                }
+                break;
             default:
                 throw new NotImplementedException($"FTP action '{ftpAction.Action}' is not yet implemented.");
         }
