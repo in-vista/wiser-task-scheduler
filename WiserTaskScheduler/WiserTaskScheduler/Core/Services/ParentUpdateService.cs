@@ -28,10 +28,10 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ILogService logService;
         private readonly ILogger<ParentUpdateService> logger;
         private readonly IBranchesService branchesService;
-        
+
         private bool updatedParentUpdatesTable = false;
         private bool updatedTargetDatabaseList = false;
-            
+
         // Database strings used to target other dbs in the same cluster.
         private readonly List<ParentUpdateDatabaseStrings> targetDatabases = [];
 
@@ -55,11 +55,11 @@ namespace WiserTaskScheduler.Core.Services
             using var scope = serviceProvider.CreateScope();
             await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-            
+
             // Update parent table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
             if (!updatedParentUpdatesTable)
             {
-                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> 
+                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string>
                     {
                         WiserTableNames.WiserParentUpdates
                     }
@@ -75,17 +75,17 @@ namespace WiserTaskScheduler.Core.Services
 
             foreach (var database in targetDatabases)
             {
-                await ParentsUpdateMainAsync(databaseConnection, databaseHelpersService, database);    
+                await ParentsUpdateMainAsync(databaseConnection, databaseHelpersService, database);
             }
-            
+
             runCounter++;
             if (runCounter > parentsUpdateServiceSettings.PerformOptimizeEveryXtimes && parentsUpdateServiceSettings.PerformOptimizeEveryXtimes > 0)
             {
                 foreach (var database in targetDatabases)
                 {
-                    await ParentsUpdateOptimizeTables(databaseConnection, databaseHelpersService, database);    
+                    await ParentsUpdateOptimizeTables(databaseConnection, databaseHelpersService, database);
                 }
-                
+
                 runCounter = 0;
             }
         }
@@ -104,14 +104,14 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
                     var exceptionOccurred = false;
-                    
+
                     foreach (DataRow dataRow in dataTable.Rows)
                     {
                         var tableName = dataRow.Field<string>("target_table");
 
                         var query = $"SET @saveHistory := false; UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
 
-                        try 
+                        try
                         {
                             await databaseConnection.ExecuteAsync(query);
                         }
@@ -121,7 +121,7 @@ namespace WiserTaskScheduler.Core.Services
                             await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
                         }
                     }
-                            
+
                     try
                     {
                         if (!exceptionOccurred)
@@ -136,7 +136,7 @@ namespace WiserTaskScheduler.Core.Services
                 }
             }
         }
-        
+
         /// <summary>
         /// The optimize routine, performs the optimize query on the targeted databse
         /// </summary>
@@ -160,24 +160,24 @@ namespace WiserTaskScheduler.Core.Services
                 }
             }
         }
-        
-        // <summary>
+
+        /// <summary>
         /// Helper function to rebuild the targeted database list
         /// </summary>
         private void UpdateTargetedDatabases(IDatabaseConnection databaseConnection)
         {
             targetDatabases.Clear();
-            
+
             // Add main database.
             var listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
             var parentsCleanUpQuery = $"DELETE FROM `{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
             var resetIncrementQuery = $"ALTER TABLE `{WiserTableNames.WiserParentUpdates}` AUTO_INCREMENT = 1";
             var optimizeQuery = $"OPTIMIZE TABLE `{WiserTableNames.WiserParentUpdates}`;";
-            
+
             var combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
-            
+
             targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, combinedCleanUpQuery, optimizeQuery ));
-            
+
             if (parentsUpdateServiceSettings.AdditionalDatabases != null)
             {
                 // Add additional databases.
@@ -187,12 +187,12 @@ namespace WiserTaskScheduler.Core.Services
                     parentsCleanUpQuery = $"DELETE FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
                     resetIncrementQuery = $"ALTER TABLE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` AUTO_INCREMENT = 1;";
                     optimizeQuery = $"OPTIMIZE TABLE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                    
+
                     combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
 
-                    targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery, optimizeQuery));    
+                    targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery, optimizeQuery));
                 }
             }
-        }   
+        }
     }
 }
