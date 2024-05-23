@@ -117,6 +117,11 @@ namespace WiserTaskScheduler.Core.Services
                         {
                             switch (oAuthApi.GrantType)
                             {
+                                case OAuthGrantType.RefreshToken:
+                                    formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
+                                    break;
+                                    
                                 case OAuthGrantType.AuthCode:
                                     throw new NotImplementedException("OAuthGrantType.AuthCode is not supported yet");
                                     break;
