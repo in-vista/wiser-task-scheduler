@@ -1,4 +1,5 @@
-﻿using GeeksCoreLibrary.Modules.Communication.Models;
+﻿using AutoUpdater.Slack.modules;
+using GeeksCoreLibrary.Modules.Communication.Models;
 
 namespace AutoUpdater.Models;
 
