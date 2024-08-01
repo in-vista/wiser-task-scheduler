@@ -321,6 +321,10 @@ FROM (
                     await branchDatabaseConnection.ExecuteAsync(createTableResult.Rows[0].Field<string>("Create table"));
                 }
 
+                // Create the wiser_id_mappings table in the new branch.
+                // This is used to know which IDs are already synced to the production environment.
+                await branchDatabaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings});
+
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Fill the tables with data.
@@ -330,6 +334,17 @@ FROM (
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
+                    
+                    // Skip copying the contents of certain tables if the table should not be copied or only the structure.
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.CopyType == CopyTypes.Nothing || t.CopyType == CopyTypes.Structure) && (
+                            (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                            || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        continue;
+                    }
+                    
                     var bulkCopy = new MySqlBulkCopy((MySqlConnection) branchDatabaseConnection.GetConnectionForWriting()) {DestinationTableName = tableName, ConflictOption = MySqlBulkLoaderConflictOption.Ignore};
 
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
@@ -550,6 +565,8 @@ FROM (
                                 }
                             }
                         }
+
+                        await AddInitialIdMappingAsync(branchDatabaseConnection, tableName);
 
                         continue;
                     }
@@ -859,6 +876,18 @@ AND EXTRA NOT LIKE '%GENERATED'";
 
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
+                    var tableName = dataRow.Field<string>("EVENT_OBJECT_TABLE");
+                    
+                    // Check if the structure of the table is excluded from the creation of the branch.
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                            (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                            || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        continue;
+                    }
+                    
                     query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
                     await branchDatabaseConnection.ExecuteAsync(query);
                 }
@@ -963,6 +992,30 @@ AND EXTRA NOT LIKE '%GENERATED'";
             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
             return bulkCopyResult.RowsInserted;
+        }
+
+        /// <summary>
+        /// Add the initial ID mappings for a table. These will be the same ID in both databases and is used to determine if an item is already mapped.
+        /// </summary>
+        /// <param name="branchDatabaseConnection">The database connection of the branch to use.</param>
+        /// <param name="tableName">The name of the table to map the initial IDs for.</param>
+        private static async Task AddInitialIdMappingAsync(IDatabaseConnection branchDatabaseConnection, string tableName)
+        {
+            // If the current table is of wiser_item then insert a record for the root folder to match for parent IDs.
+            if (tableName.EndsWith("wiser_item"))
+            {
+                await branchDatabaseConnection.ExecuteAsync($"""
+                    INSERT IGNORE INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
+                    SELECT '{tableName}', 0, 0
+                """);
+            }
+            
+            // Add all IDs that have been copied from the production database to the branch database to indicate that they are already mapped in the ID mappings.
+            await branchDatabaseConnection.ExecuteAsync($"""
+                INSERT INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
+                SELECT '{tableName}', id, id
+                FROM {tableName}
+            """);
         }
 
         /// <summary>
