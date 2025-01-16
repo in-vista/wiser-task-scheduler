@@ -92,13 +92,30 @@ namespace WiserTaskScheduler.Modules.Branches.Services
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Start handling branches queue in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
-            // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
-            databaseConnection.AddParameter("now", DateTime.Now);
-            var dataTable = await databaseConnection.GetAsync($@"SELECT * 
-FROM {WiserTableNames.WiserBranchesQueue}
-WHERE started_on IS NULL
-AND start_on <= ?now
-ORDER BY start_on ASC, id ASC");
+            string query;
+            
+            if (branchQueue.AutomaticDeployBranchQueueId > 0)
+            {
+                databaseConnection.AddParameter("automaticDeployBranchQueueId", branchQueue.AutomaticDeployBranchQueueId);
+                query = $"SELECT * FROM {WiserTableNames.WiserBranchesQueue} WHERE id = ?automaticDeployBranchQueueId";
+            }
+            else
+            {
+                // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
+                databaseConnection.AddParameter("now", DateTime.Now);
+                
+                query = $"""
+                         SELECT * 
+                         FROM {WiserTableNames.WiserBranchesQueue}
+                         WHERE started_on IS NULL
+                         AND is_template = 0
+                         AND is_for_automatic_deploy = 0
+                         AND start_on <= ?now
+                         ORDER BY start_on ASC, id ASC
+                         """;
+            }
+            
+            var dataTable = await databaseConnection.GetAsync(query);
 
             var results = new JArray();
             foreach (DataRow dataRow in dataTable.Rows)
@@ -124,6 +141,40 @@ ORDER BY start_on ASC, id ASC");
             {
                 {"Results", results}
             };
+        }
+
+        /// <inheritdoc />
+        public MySqlConnectionStringBuilder GetConnectionStringBuilderForBranch(BranchActionBaseModel branchActionBaseModel, string database, bool allowLoadLocalInfile = false)
+        {
+            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
+            {
+                IgnoreCommandTransaction = true,
+                AllowLoadLocalInfile = allowLoadLocalInfile,
+                ConvertZeroDateTime = true,
+                Database = database
+            };
+
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabaseHost))
+            {
+                connectionStringBuilder.Server = branchActionBaseModel.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            
+            if (branchActionBaseModel.DatabasePort is > 0)
+            {
+                connectionStringBuilder.Port = (uint)branchActionBaseModel.DatabasePort.Value;
+            }
+            
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabaseUsername))
+            {
+                connectionStringBuilder.UserID = branchActionBaseModel.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabasePassword))
+            {
+                connectionStringBuilder.Password = branchActionBaseModel.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+
+            return connectionStringBuilder;
         }
 
         /// <summary>
@@ -191,31 +242,7 @@ ORDER BY start_on ASC, id ASC");
                     ConvertZeroDateTime = true
                 };
 
-                var branchConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
-                {
-                    IgnoreCommandTransaction = true,
-                    AllowLoadLocalInfile = true,
-                    ConvertZeroDateTime = true
-                };
-
-                branchConnectionStringBuilder.Database = "";
-
-                if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
-                {
-                    branchConnectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
-                if (settings.DatabasePort is > 0)
-                {
-                    branchConnectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
-                }
-                if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
-                {
-                    branchConnectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
-                if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
-                {
-                    branchConnectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
+                var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(settings, "", allowLoadLocalInfile: true);
 
                 // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
                 var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
@@ -1084,31 +1111,9 @@ AND EXTRA NOT LIKE '%GENERATED'";
             var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
 
             // Store database names in variables for later use and create connection string for the branch database.
-            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
-            {
-                IgnoreCommandTransaction = true,
-                ConvertZeroDateTime = true
-            };
-            var originalDatabase = connectionStringBuilder.Database;
+            var originalDatabase = new MySqlConnectionStringBuilder(connectionString).Database;
             var branchDatabase = settings.DatabaseName;
-            connectionStringBuilder.Database = branchDatabase;
-
-            if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
-            {
-                connectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
-            if (settings.DatabasePort is > 0)
-            {
-                connectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
-            }
-            if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
-            {
-                connectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
-            if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
-            {
-                connectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
+            var connectionStringBuilder = GetConnectionStringBuilderForBranch(settings, branchDatabase);
 
             // Create and open connections to both databases and start transactions.
             var productionConnection = new MySqlConnection(connectionString);
@@ -2820,7 +2825,7 @@ WHERE `id` = ?id";
             WiserItemModel template = null;
             if (templateId > 0)
             {
-                template = await wiserItemsService.GetItemDetailsAsync(branchQueue.MergedBranchTemplateId, userId: userId);
+                template = await wiserItemsService.GetItemDetailsAsync(branchQueue.MergedBranchTemplateId, userId: userId, skipPermissionsCheck: true);
             }
 
             var subject = template?.GetDetailValue("subject");
@@ -2835,8 +2840,11 @@ WHERE `id` = ?id";
                 content = defaultMessageContent;
             }
 
-            await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
-            await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
+            if (userId > 0)
+            {
+                await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
+                await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
+            }
         }
 
         /// <summary>
