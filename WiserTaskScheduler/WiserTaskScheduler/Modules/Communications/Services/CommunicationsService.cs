@@ -35,7 +35,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     private readonly ILogger<CommunicationsService> logger;
 
     private const string EmailSubjectForCommunicationError = "Error while sending communication";
-    
+
     private DateTime lastErrorSent = DateTime.MinValue;
     private string connectionString;
 
@@ -57,19 +57,19 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
 	    var communication = (CommunicationModel) action;
-	    
+
 	    using var scope = serviceProvider.CreateScope();
 	    await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-	    
+
 	    var connectionStringToUse = communication.ConnectionString ?? connectionString;
 	    await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
-	    
+
 	    var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
 	    var dataSelectorsService = scope.ServiceProvider.GetRequiredService<IDataSelectorsService>();
 	    var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-	    
+
 	    await GenerateCommunicationsAsync(communication, databaseConnection, gclCommunicationsService, dataSelectorsService, stringReplacementsService, configurationServiceName);
-	    
+
 	    switch (communication.Type)
 	    {
 	        case CommunicationTypes.Email:
@@ -122,7 +122,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 			    case SendTriggerTypes.Recurring:
 				    var currentDate = DateTime.Now;
 
-				    // Don't send the communication if we don't have all required values or if today is not between the start and end date. 
+				    // Don't send the communication if we don't have all required values or if today is not between the start and end date.
 				    if (!communicationSetting.TriggerStart.HasValue ||
 				        !communicationSetting.TriggerEnd.HasValue ||
 				        !communicationSetting.TriggerTime.HasValue ||
@@ -220,7 +220,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 					    await logService.LogWarning(logger, LogScopes.RunBody, communication.LogSettings, $"Duplicate receiver ({receiver}) for communication with ID '{communicationSetting.Id}'.", configurationServiceName, communication.TimeId, communication.Order);
 					    continue;
 				    }
-				    
+
 				    receivers.Add(receiver, null);
 			    }
 		    }
@@ -341,7 +341,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    string statusCode = null;
 		    string statusMessage = null;
 		    var sendErrorNotification = false;
-		    
+
 		    try
 		    {
 			    email.AttemptCount++;
@@ -384,13 +384,13 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    {
 			    failed++;
 			    sendErrorNotification = true;
-			    
+
 			    databaseConnection.ClearParameters();
 			    statusCode = "General exception";
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{e}";
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send email for communication ID {email.Id} due to general error:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
 		    }
-		    
+
 		    databaseConnection.AddParameter("attempt_count", email.AttemptCount);
 		    databaseConnection.AddParameter("last_attempt", DateTime.Now);
 			databaseConnection.AddParameter("status_code", statusCode);
@@ -402,7 +402,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 			    await SendErrorNotification(communication, databaseConnection, email, statusMessage);
 		    }
 	    }
-        
+
 	    return new JObject()
 	    {
 		    {"Type", "Email"},
@@ -466,7 +466,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    databaseConnection.AddParameter("status_message", statusMessage);
 		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, sms.Id);
 	    }
-	    
+
 	    return new JObject()
 	    {
 		    {"Type", "Sms"},
@@ -552,7 +552,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         databaseConnection.AddParameter("now", DateTime.Now);
         databaseConnection.AddParameter("maxDelayInHours", communication.MaxDelayInHours);
         databaseConnection.AddParameter("maxNumberOfCommunicationAttempts", communication.MaxNumberOfCommunicationAttempts);
-	    
+
         var dataTable = await databaseConnection.GetAsync($@"SELECT
 	id,
 	communication_id,
@@ -583,16 +583,16 @@ WHERE
 	AND attempt_count < ?maxNumberOfCommunicationAttempts");
 
         var communications = new List<SingleCommunicationModel>();
-        
+
         foreach (DataRow row in dataTable.Rows)
         {
 	        try
 	        {
 		        communications.Add(GetModel(row));
 	        }
-	        catch (Exception e)
+	        catch (Exception exception)
 	        {
-		        await logService.LogInformation(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to create model for communication ID '{Convert.ToInt32(row["id"])}' with exception:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
+		        await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to create model for communication ID '{Convert.ToInt32(row["id"])}' with exception:\n{exception}", configurationServiceName, communication.TimeId, communication.Order);
 	        }
         }
 
@@ -620,7 +620,7 @@ WHERE
 		        {
 			        continue;
 		        }
-		        
+
 		        receiverAddresses.Add(new CommunicationReceiverModel()
 		        {
 			        Address = addresses[i],
@@ -628,7 +628,7 @@ WHERE
 		        });
 	        }
         }
-        
+
         var bccAddresses = new List<string>();
         var rawBccValue = row.Field<string>("bcc");
         if (!String.IsNullOrWhiteSpace(rawBccValue))
@@ -694,7 +694,7 @@ WHERE
 	    {
 		    return false;
 	    }
-	    
+
 	    var totalMinutesSinceLastAttempt = (DateTime.Now - singleCommunication.LastAttempt.Value).TotalMinutes;
 
 	    return (singleCommunication.AttemptCount == 1 && totalMinutesSinceLastAttempt < 1)
@@ -718,7 +718,7 @@ WHERE
 		    lastErrorSent = lastErrorMail.Rows[0].Field<DateTime>("lastErrorMail").Date;
 		    return;
 	    }
-			    
+
 	    databaseConnection.ClearParameters();
 	    databaseConnection.AddParameter("receiver", communication.EmailAddressForErrorNotifications);
 	    databaseConnection.AddParameter("sender", singleCommunicationModel.Sender);
