@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using EvoPdf;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -11,7 +10,6 @@ using GeeksCoreLibrary.Modules.GclConverters.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using PdfSharp.Pdf;
 using WiserTaskScheduler.Core.Enums;
@@ -33,7 +31,6 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         private readonly ILogService logService;
         private readonly ILogger<GenerateFileService> logger;
         private readonly IServiceProvider serviceProvider;
-        private readonly GclSettings gclSettings;
 
         /// <summary>
         /// Create a new instance of <see cref="GenerateFileService"/>.
@@ -43,13 +40,12 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="logger"></param>
         /// <param name="serviceProvider"></param>
         /// <param name="gclSettings"></param>
-        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider)
         {
             this.bodyService = bodyService;
             this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
-            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
