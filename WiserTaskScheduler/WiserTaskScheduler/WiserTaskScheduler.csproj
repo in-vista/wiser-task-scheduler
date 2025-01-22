@@ -26,12 +26,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="evointernal.dat">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
     <Content Include="..\.dockerignore">
       <Link>.dockerignore</Link>
     </Content>
