@@ -1,8 +1,8 @@
 ﻿using AutoUpdater.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 #if !DEBUG
+using AutoUpdater.Models;
 using System.Collections.Concurrent;
-using AutoUpdater.Slack.modules;
 using Microsoft.Extensions.Options;
 using SlackNet;
 using SlackNet.WebApi;

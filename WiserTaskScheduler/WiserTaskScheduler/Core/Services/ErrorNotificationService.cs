@@ -1,4 +1,30 @@
-﻿using System;
+﻿namespace WiserTaskScheduler.Core.Services;
+
+#if DEBUG
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Enums;
+using Interfaces;
+using Models;
+public class ErrorNotificationService : IErrorNotificationService, ISingletonService
+{
+    /// <inheritdoc />
+    public Task NotifyOfErrorByEmailAsync(string emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
+    {
+        // Do nothing in debug mode, to not spam Slack while developing.
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task NotifyOfErrorByEmailAsync(List<string> emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
+    {
+        // Do nothing in debug mode, to not spam Slack while developing.
+        return Task.CompletedTask;
+    }
+}
+#else
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,21 +40,18 @@ using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using WiserTaskScheduler.Core.Enums;
-using WiserTaskScheduler.Core.Interfaces;
-using WiserTaskScheduler.Core.Models;
-
-namespace WiserTaskScheduler.Core.Services;
+using Enums;
+using Interfaces;
+using Models;
 
 public class ErrorNotificationService(IServiceProvider serviceProvider, ILogService logService, ILogger<ErrorNotificationService> logger, IOptions<WtsSettings> wtsSettings) : IErrorNotificationService, ISingletonService
 {
-    private ConcurrentDictionary<string, DateTime> sendNotifications = new();
+    private readonly WtsSettings wtsSettings = wtsSettings.Value;
+    private readonly ConcurrentDictionary<string, DateTime> sendNotifications = new();
 
     /// <inheritdoc />
-#pragma warning disable CS1998
     public async Task NotifyOfErrorByEmailAsync(string emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
     {
-#if !DEBUG
         // Only send mails for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
         if (String.IsNullOrWhiteSpace(emails))
         {
@@ -50,9 +73,7 @@ public class ErrorNotificationService(IServiceProvider serviceProvider, ILogServ
 
         var emailList = emails.Split(";").ToList();
         await NotifyOfErrorByEmailAsync(emailList, subject, content, logSettings, logScope, configurationName);
-#endif
     }
-#pragma warning restore CS1998
 
     /// <inheritdoc />
     public async Task NotifyOfErrorByEmailAsync(List<string> emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
@@ -99,3 +120,4 @@ public class ErrorNotificationService(IServiceProvider serviceProvider, ILogServ
         }
     }
 }
+#endif
