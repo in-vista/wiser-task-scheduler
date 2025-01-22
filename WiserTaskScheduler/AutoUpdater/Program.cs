@@ -1,24 +1,20 @@
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
 using AutoUpdater.Services;
-using AutoUpdater.Slack.modules;
 using AutoUpdater.Workers;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
-using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration.Json;
 using Serilog;
 using SlackNet.AspNetCore;
 
-IHost host = Host.CreateDefaultBuilder(args)
-    .UseWindowsService((options) =>
-    {
-        options.ServiceName = "WTS Auto Updater";
-    })
+var host = Host.CreateDefaultBuilder(args)
+    .UseWindowsService(options => { options.ServiceName = "WTS Auto Updater"; })
     .ConfigureAppConfiguration((hostingContext, config) =>
     {
         config.SetBasePath(AppContext.BaseDirectory);
         config.Sources
-            .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
+            .OfType<JsonConfigurationSource>()
             .Where(x => x.Path == "appsettings.json");
 
         // We need to build here already, so that we can read the base directory for secrets.
@@ -41,14 +37,14 @@ IHost host = Host.CreateDefaultBuilder(args)
 
         var slackSettings = hostContext.Configuration.GetSection("Updater").GetSection("SlackSettings");
         services.Configure<SlackSettings>(slackSettings);
-        
+
         services.AddHostedService<UpdateWorker>();
 
         services.AddSingleton<ISlackChatService, SlackChatService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddHttpContextAccessor();
         services.AddGclServices(hostContext.Configuration, false, false, false);
-        
+
         // If there is a bot token provided for Slack add the service. 
         var slackBotToken = slackSettings.GetValue<string>("BotToken");
         if (!String.IsNullOrWhiteSpace(slackBotToken))

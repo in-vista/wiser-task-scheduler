@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-
-namespace AutoUpdater.Models;
+﻿namespace AutoUpdater.Models;
 
 public class VersionModel
 {
@@ -23,7 +21,7 @@ public class VersionModel
     /// The revision part of the version.
     /// </summary>
     public int Revision { get; set; }
-    
+
     public Version Version => new(ToString());
 
     /// <summary>

@@ -19,20 +19,9 @@ using WiserTaskScheduler.Modules.DocumentStoreRead.Models;
 
 namespace WiserTaskScheduler.Modules.DocumentStoreRead.Services;
 
-public class DocumentStoreReadService : IDocumentStoreReadService, IScopedService, IActionsService
+public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger) : IDocumentStoreReadService, IScopedService, IActionsService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<CleanupItemsService> logger;
-
     private string connectionString;
-
-    public DocumentStoreReadService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-    }
 
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
@@ -44,8 +33,8 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var documentStoreReadItem = (DocumentStoreReadModel)action;
-        
+        var documentStoreReadItem = (DocumentStoreReadModel) action;
+
         var processedItems = 0;
         var successfulItems = 0;
         var failedItems = 0;
@@ -53,11 +42,11 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
         if (String.IsNullOrWhiteSpace(documentStoreReadItem.EntityName))
         {
             await logService.LogError(logger, LogScopes.RunStartAndStop, documentStoreReadItem.LogSettings, "Can't process items because no entity name has been provided.", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
-            return new JObject()
+            return new JObject
             {
-                { "ItemsProcessed", processedItems },
-                { "ItemsSuccessful", successfulItems },
-                { "ItemsFailed", failedItems }
+                {"ItemsProcessed", processedItems},
+                {"ItemsSuccessful", successfulItems},
+                {"ItemsFailed", failedItems}
             };
         }
 
@@ -68,17 +57,17 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
 
         var prefix = await wiserItemsService.GetTablePrefixForEntityAsync(documentStoreReadItem.EntityName);
         var entityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(documentStoreReadItem.EntityName);
-        
+
         var dataTable = await databaseConnection.GetAsync($"""
-            SELECT id
-            FROM {prefix}{WiserTableNames.WiserItem}
-            WHERE entity_type = ?entityType
-            AND json IS NOT NULL
-            AND (
-	            json_last_processed_date IS NULL
-	            OR json_last_processed_date < changed_on
-            )
-""");
+                                                                       SELECT id
+                                                                       FROM {prefix}{WiserTableNames.WiserItem}
+                                                                       WHERE entity_type = ?entityType
+                                                                       AND json IS NOT NULL
+                                                                       AND (
+                                                           	            json_last_processed_date IS NULL
+                                                           	            OR json_last_processed_date < changed_on
+                                                                       )
+                                                           """);
 
         foreach (DataRow row in dataTable.Rows)
         {
@@ -95,7 +84,7 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                     failedItems++;
                     continue;
                 }
-                
+
                 if (documentStoreReadItem.PublishedEnvironmentToSet != null)
                 {
                     item.PublishedEnvironment = (Environments) documentStoreReadItem.PublishedEnvironmentToSet;
@@ -117,12 +106,12 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                 await logService.LogWarning(logger, LogScopes.RunBody, documentStoreReadItem.LogSettings, $"Failed to process wiser item due to exception:\n{e}", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
             }
         }
-        
-        return new JObject()
+
+        return new JObject
         {
-            { "ItemsProcessed", processedItems },
-            { "ItemsSuccessful", successfulItems },
-            { "ItemsFailed", failedItems }
+            {"ItemsProcessed", processedItems},
+            {"ItemsSuccessful", successfulItems},
+            {"ItemsFailed", failedItems}
         };
     }
 }
