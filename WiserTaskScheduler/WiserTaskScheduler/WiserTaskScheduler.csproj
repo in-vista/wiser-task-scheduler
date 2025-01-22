@@ -19,10 +19,8 @@
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1"/>
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1"/>
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
-        <PackageReference Include="Serilog.Sinks.MySQL" Version="5.0.0"/>
         <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.1"/>
         <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4"/>
-        <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0"/>
     </ItemGroup>
 
     <ItemGroup>
