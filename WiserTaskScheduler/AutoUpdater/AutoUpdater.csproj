@@ -21,8 +21,4 @@
         <PackageReference Include="Serilog.AspNetCore" Version="7.0.0" />
         <PackageReference Include="SlackNet.AspNetCore" Version="0.13.2" />
     </ItemGroup>
-
-    <ItemGroup>
-      <Folder Include="Slack\modules\" />
-    </ItemGroup>
 </Project>
