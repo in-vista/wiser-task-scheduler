@@ -271,7 +271,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // Update connection string again after creating and selecting the new database schema.
             await branchDatabaseConnection.ChangeConnectionStringsAsync(branchConnectionStringBuilder.ConnectionString, branchConnectionStringBuilder.ConnectionString);
 
-            // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
+            // Get all tables that don't start with an underscore (wiser tables never start with an underscore, and we often use that for temporary or backup tables).
             // Handle the wiser_itemfile tables as last to ensure all other tables are copied first.
             var query = $"""
                          SELECT *
@@ -380,12 +380,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             continue;
                         }
 
-                        // If mode is nothing, skip everything of this entity type.
-                        if (entity.Mode == CreateBranchEntityModes.Nothing)
-                        {
-                            continue;
-                        }
-
                         var orderBy = "";
                         var whereClauseBuilder = new StringBuilder($"WHERE item.entity_type = '{entity.EntityType.ToMySqlSafeValue(false)}'");
 
@@ -476,6 +470,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 var dataSelectorIds = dataSelectorResult.Select(i => i["id"]).ToList();
                                 whereClauseBuilder.AppendLine($"AND item.id IN ({String.Join(", ", dataSelectorIds)})");
                                 break;
+                            case CreateBranchEntityModes.Nothing:
+                                // If mode is nothing, skip everything of this entity type.
+                                continue;
                             default:
                                 throw new ArgumentOutOfRangeException(nameof(entity.Mode), entity.Mode.ToString(), null);
                         }
@@ -1123,6 +1120,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var branchDatabaseConnection = branchScope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
             var branchDatabaseHelpersService = branchScope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            var branchLinkTypesService = branchScope.ServiceProvider.GetRequiredService<ILinkTypesService>();
+            var branchEntityTypesService = branchScope.ServiceProvider.GetRequiredService<IEntityTypesService>();
 
             // Create the wiser_id_mappings table, in the selected branch, if it doesn't exist yet.
             // We need it to map IDs of the selected environment to IDs of the production environment, because they are not always the same.
@@ -1142,7 +1141,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET total_items = ?totalItems, items_processed = 0 WHERE id = ?queueId");
 
             // Set saveHistory and username parameters for all queries.
-            var queryPrefix = "SET @saveHistory = TRUE; SET @_username = ?username; ";
+            const string queryPrefix = "SET @saveHistory = TRUE; SET @_username = ?username; ";
             var username = $"{dataRowWithSettings.Field<string>("added_by")} (Sync from {branchDatabase})";
             if (username.Length > 50)
             {
@@ -1177,7 +1176,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName) && !tableName.Contains(WiserTableNames.WiserItemLink))
                 {
                     tablesToLock.Add(wiserItemTableName);
-                    tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
+                    if (WiserTableNames.TablesWithArchive.Any(table => tableName.EndsWith(wiserItemTableName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
+                    }
                 }
 
                 var action = dataRow.Field<string>("action").ToUpperInvariant();
@@ -1199,6 +1201,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         // the source item ID (which is saved in "oldvalue") and the link type (which is saved in "field") to get a unique ID for the link.
                         var linkType = field ?? "0";
                         objectId = $"{originalItemId}_{dataRow["oldvalue"]}_{linkType}";
+                        break;
+                    }
+                    case "INSERT_PERMISSION":
+                    {
+                        // With INSERT_PERMISSION actions, we need to look up the highest role ID to create a temporary unique ID for the role.
+                        // So we need to lock the wiser_roles table, otherwise we can't query it later.
+                        tablesToLock.Add(WiserTableNames.WiserRoles);
                         break;
                     }
                 }
@@ -1233,7 +1242,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             }
 
             // Fetch Link settings before we lock the tables.
-            var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
+            var allLinkTypeSettings = await branchLinkTypesService.GetAllLinkTypeSettingsAsync();
 
             // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
             await LockTablesAsync(productionConnection, tablesToLock, false);
@@ -1249,6 +1258,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // This is to map one item ID to another. This is needed because when someone creates a new item in the other environment, that ID could already exist in the production environment.
             // So we need to map the ID that is saved in wiser_history to the new ID of the item that we create in the production environment.
             var idMapping = new Dictionary<string, Dictionary<ulong, ulong>>(StringComparer.OrdinalIgnoreCase);
+            var idMappingsAddedInCurrentMerge = new Dictionary<string, Dictionary<ulong, ulong>>(StringComparer.OrdinalIgnoreCase);
             await using (var environmentCommand = branchConnection.CreateCommand())
             {
                 environmentCommand.CommandText = $"SELECT table_name, our_id, production_id FROM `{WiserTableNames.WiserIdMappings}`";
@@ -1262,12 +1272,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     var ourId = dataRow.Field<ulong>("our_id");
                     var productionId = dataRow.Field<ulong>("production_id");
 
-                    if (!idMapping.ContainsKey(tableName!))
+                    if (!idMapping.TryGetValue(tableName!, out var idMappingsForTable))
                     {
-                        idMapping.Add(tableName, new Dictionary<ulong, ulong>());
+                        idMappingsForTable = new Dictionary<ulong, ulong>();
+                        idMapping.Add(tableName, idMappingsForTable);
                     }
 
-                    idMapping[tableName][ourId] = productionId;
+                    idMappingsForTable[ourId] = productionId;
                 }
 
                 // Get all IDs from the mappings that don't exist anymore in production, so that we can remove them.
@@ -1671,7 +1682,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         branchCommand.CommandText = "UNLOCK TABLES";
                         await branchCommand.ExecuteNonQueryAsync();
 
-                        linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService, allLinkTypeSettings, allEntityTypeSettings);
+                        linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, branchEntityTypesService, allLinkTypeSettings, allEntityTypeSettings);
                         if (linkData.HasValue)
                         {
                             linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.Value && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
@@ -1693,6 +1704,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 tablesToLock.Add($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}");
                             }
                         }
+
+                        // TODO: If linkData is null, look if the source and destinaition items exist in the default wiser_item or wiser_item_archive tables.
+                        // TODO: If we do find something, then get the entity type from those items and use those to see if we can find the link type that way from "settings.LinkTypes" and store that into "linkTypeSettings".
+                        // TODO: If linkTypeSettings is still null after that, then we know that this is a link type that hasn't been added to the settings yet.
+                        // TODO: In that case, we should log a warning and then check if either the source entity or the destination entity has been selected to be merged in "settings.Entities".
+                        // TODO: If that is the case, then merge the link change as well, otherwise skip it.
+                        // TODO: The GCL has a similar fallback mechanism, this way we can still merge those unspecified link types.
 
                         // Lock the tables again when we're done.
                         await LockTablesAsync(productionConnection, tablesToLock, false);
@@ -1820,7 +1838,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, tableName, originalItemId, newItemId, branchConnection, productionConnection);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalItemId, newItemId, branchConnection, productionConnection);
 
                             break;
                         }
@@ -1892,7 +1910,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                     if (originalTargetId > 0)
                                     {
-                                        await AddIdMappingAsync(idMapping, tableName, originalTargetId, existingId, branchConnection, productionConnection);
+                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalTargetId, existingId, branchConnection, productionConnection);
                                     }
                                 }
                                 else
@@ -1909,7 +1927,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                     if (originalTargetId > 0)
                                     {
-                                        await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection, productionConnection);
+                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalTargetId, newItemId, branchConnection, productionConnection);
                                     }
                                 }
                             }
@@ -2078,7 +2096,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, tableName, originalLinkId.Value, linkId.Value, branchConnection, productionConnection);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalLinkId.Value, linkId.Value, branchConnection, productionConnection);
 
                             break;
                         }
@@ -2242,7 +2260,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection, productionConnection);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalObjectId, newFileId, branchConnection, productionConnection);
 
                             break;
                         }
@@ -2345,53 +2363,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserQuery when queryMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserModule when moduleMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserPermission when permissionMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserLink when linkMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserRoles when roleMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Create: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case "easy_objects" when objectMergeSettings is not {Create: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
@@ -2414,6 +2396,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             await using var productionCommand = productionConnection.CreateCommand();
                             AddParametersToCommand(sqlParameters, productionCommand);
+
+                            // TODO: Dynamically look up if the current table has a unique index, and if so, generate a unique value for each column from that index.
+                            // TODO: Then we can get rid of these if-else statements and make this code more generic.
+                            // TODO: Afterwards, look up all values from the columns of this index, by using the newId variable and looking up the row in the current table in the branch.
+                            // TODO: Then look in production to see if it already has a row with the same values. If so, map the newId to the ID of the row in production and skip the insert statement.
+                            // TODO: Then all follow up update/delete statements should update the correct row in production and no longer cause duplicate key exceptions if someone has already added this row manually on production before the merge.
 
                             if (tableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
                             {
@@ -2441,6 +2429,26 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                  VALUES (?newId, 0, ?guid, ?guid2)
                                                                  """;
                             }
+                            else if (tableName.Equals(WiserTableNames.WiserPermission, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // The table wiser_permission has a unique index on all columns, so we need to temporarily use a role ID that doesn't exist yet, to prevent duplicate index errors when multiple permissions are added in a row.
+                                // This query first gets the maximum role ID from the table, and then adds 1 to it, so that we can be sure that we have ID of a role that doesn't exist.
+                                // Then it checks the highest role_id from the wiser_permission table, and if that is higher than the one we just generated, we add 1 to that one and use that as the temporary ID.
+                                // This all is to prevent duplicate index errors and also to prevent accidentally overwriting someone's permissions.
+                                // Lastly, it also adds temporary non-existing values to most other columns, to prevent duplicate index errors when the role_id gets updated in an "UPDATE_PERMISSION" action.
+                                productionCommand.CommandText = $"""
+                                                                 {queryPrefix}
+                                                                 SET @temporaryRoleId = (SELECT IFNULL(MAX(id), 0) + 1 FROM `{WiserTableNames.WiserRoles}`);
+                                                                 SET @temporaryRoleId = (SELECT IF(MAX(role_id) >= @temporaryRoleId, MAX(role_id) + 1, @temporaryRoleId) FROM `{tableName}`);
+                                                                 SET @temporaryItemId = (SELECT IFNULL(MAX(item_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryEntityPropertyId = (SELECT IFNULL(MAX(entity_property_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryQueryId = (SELECT IFNULL(MAX(query_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryDataSelectorId = (SELECT IFNULL(MAX(data_selector_id), 0) + 1 FROM `{tableName}`);
+                                                                 INSERT INTO `{tableName}` (id, `role_id`, `item_id`, `entity_property_id`, `module_id`, `query_id`, `data_selector_id`)
+                                                                 VALUES (?newId, @temporaryRoleId, @temporaryItemId, @temporaryEntityPropertyId, @temporaryModuleId, @temporaryQueryId, @temporaryDataSelectorId)
+                                                                 """;
+                            }
                             else
                             {
                                 productionCommand.CommandText = $"""
@@ -2453,7 +2461,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, tableName, originalObjectId, newEntityId, branchConnection, productionConnection);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, originalObjectId, newEntityId, branchConnection, productionConnection);
 
                             break;
                         }
@@ -2475,53 +2483,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserQuery when queryMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserModule when moduleMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserPermission when permissionMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserLink when linkMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserRoles when roleMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Update: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case "easy_objects" when objectMergeSettings is not {Update: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
@@ -2561,53 +2533,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserQuery when queryMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserModule when moduleMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserPermission when permissionMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserLink when linkMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserRoles when roleMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Delete: true}:
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 case "easy_objects" when objectMergeSettings is not {Delete: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
@@ -2645,28 +2581,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
             await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory, true);
 
-            // Check if any ids need to be updated for styledoutput entries.
-            if (idMapping.ContainsKey(WiserTableNames.WiserStyledOutput))
+            // Check if any ids need to be updated for styled output entries.
+            if (idMappingsAddedInCurrentMerge.TryGetValue(WiserTableNames.WiserStyledOutput, out var styledOutputMappings))
             {
-                foreach (var oldId in idMapping[WiserTableNames.WiserStyledOutput])
-                {
-                    var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
-                    if (newId != oldId.Key)
-                    {
-                        // An Id is different and needs to be updated inside the styledoutputs.
-                        foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
-                        {
-                            await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key,
-                                oldId.Key, newId.Value);
-                        }
-                    }
-                }
+                await UpdateStyledOutputReferencesAsync(productionConnection, styledOutputMappings);
             }
 
             try
             {
                 // Clear wiser_history in the selected environment, so that next time we can just sync all changes again.
-                if (historyItemsSynchronised.Any())
+                if (historyItemsSynchronised.Count != 0)
                 {
                     await using var environmentCommand = branchConnection.CreateCommand();
                     environmentCommand.CommandText = $"DELETE FROM `{WiserTableNames.WiserHistory}` WHERE id IN ({String.Join(",", historyItemsSynchronised)})";
@@ -2765,51 +2689,55 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET items_processed = ?itemsProcessed WHERE id = ?queueId");
     }
 
-    private static async Task ReplaceStyledOutputIdInsideStyledOutputAsync(IDatabaseConnection databaseConnection,
-        ulong targetStyledOutput, ulong oldId, ulong newId)
+    /// <summary>
+    /// Checks if any of the styled outputs have a different ID in production than the branch.
+    /// If that is the case, finds any other styles outputs that use these IDs and updates their references with the new IDs.
+    /// </summary>
+    /// <param name="productionConnection">The <see cref="MySqlConnection"/> to the production database.</param>
+    /// <param name="styledOutputMappings">The list of ID mappings for the styles output table.</param>
+    private static async Task UpdateStyledOutputReferencesAsync(MySqlConnection productionConnection, Dictionary<ulong, ulong> styledOutputMappings)
     {
-        var originalDatabase = databaseConnection.ConnectedDatabase;
-
-        // Get current Content
-        var items = await databaseConnection.GetAsync($"""
-                                                       SELECT
-                                                       `format_begin`, `format_item`, `format_end`, `format_empty`
-                                                       FROM `{originalDatabase}`.`{WiserTableNames.WiserStyledOutput}` AS prod
-                                                       WHERE prod.id = {targetStyledOutput}
-                                                       ORDER BY file.id ASC
-                                                       LIMIT 1
-                                                       """);
-        if (items.Rows.Count == 0)
+        var idsThatHaveChanged = styledOutputMappings.Where(x => x.Key != x.Value).ToList();
+        var newIdsClause = String.Join(",", idsThatHaveChanged.Select(x => x.Value));
+        foreach (var (branchId, productionId) in idsThatHaveChanged)
         {
-            // The Target styledOutput does not exist, no need to update this one.
-            return;
+            // Note: Curly Brace needs to be included in search/replace
+            var searchString = $"{{StyledOutput~{branchId}";
+            var replaceString = $"{{StyledOutput~{productionId}";
+
+            await using var productionCommand = productionConnection.CreateCommand();
+            productionCommand.Parameters.AddWithValue("searchString", searchString);
+
+            // Update all references to this styled output via simple string replacement.
+            // References to other styled output can look like this: "{StyledOutput~1}", or this: "{StyledOutput~999~SomeOtherParameter~SomeValue}".
+            // We need to replace the ID in both cases, but we can't just replace "{StyledOutput~1" with "{StyledOutput~4",
+            // because that would then turn "{StyledOutput~10}" into "{StyledOutput~40}", for example.
+            productionCommand.CommandText = $$"""
+                                             UPDATE {{WiserTableNames.WiserStyledOutput}}
+                                             SET format_begin = REPLACE(format_begin, '{{searchString}}~', '{{replaceString}}~'),
+                                                 format_begin = REPLACE(format_begin, '{{searchString}}}', '{{replaceString}}~'),
+                                                 format_item = REPLACE(format_item, '{{searchString}}~', '{{replaceString}}}'),
+                                                 format_item = REPLACE(format_item, '{{searchString}}}', '{{replaceString}}}'),
+                                                 format_end = REPLACE(format_end, '{{searchString}}~', '{{replaceString}}~'),
+                                                 format_end = REPLACE(format_end, '{{searchString}}}', '{{replaceString}}}'),
+                                                 format_empty = REPLACE(format_empty, '{{searchString}}~', '{{replaceString}}~'),
+                                                 format_empty = REPLACE(format_empty, '{{searchString}}}', '{{replaceString}}}')
+                                             WHERE id IN ({{newIdsClause}})
+                                             AND 
+                                             (
+                                                 format_begin LIKE '%{{searchString}}~%' OR
+                                                 format_begin LIKE '%{{searchString}}}%' OR
+                                                 format_item LIKE '%{{searchString}}~%' OR
+                                                 format_item LIKE '%{{searchString}}}%' OR
+                                                 format_end LIKE '%{{searchString}}~%' OR
+                                                 format_end LIKE '%{{searchString}}}%' OR
+                                                 format_empty LIKE '%{{searchString}}~%' OR
+                                                 format_empty LIKE '%{{searchString}}}%'
+                                             )
+                                             """;
+
+            await productionCommand.ExecuteNonQueryAsync();
         }
-
-        var formatBegin = items.Rows[0].Field<string>("format_begin");
-        var formatItem = items.Rows[0].Field<string>("format_item");
-        var formatEnd = items.Rows[0].Field<string>("format_end");
-        var formatEmpty = items.Rows[0].Field<string>("format_empty");
-
-        // Note: Curly Brace needs to be included in search/replace
-        var searchString = $"{{StyledOutput~{oldId}";
-        var replaceString = $"{{StyledOutput~{newId}";
-
-        formatBegin = formatBegin.Replace(searchString, replaceString);
-        formatItem = formatItem.Replace(searchString, replaceString);
-        formatEnd = formatEnd.Replace(searchString, replaceString);
-        formatEmpty = formatEmpty.Replace(searchString, replaceString);
-
-        await databaseConnection.ExecuteAsync($"""
-                                               UPDATE {WiserTableNames.WiserStyledOutput}
-                                               SET
-                                                    format_begin = {formatBegin},
-                                                    format_item = {formatItem},
-                                                    format_end = {formatEnd},
-                                                    format_empty = {formatEmpty}
-                                               WHERE id = {targetStyledOutput}
-                                               ORDER BY file.id ASC
-                                               LIMIT 1
-                                               """);
     }
 
     private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache)
@@ -3037,17 +2965,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <returns>The ID of the same item in the production environment.</returns>
     private static ulong? GetMappedId(string tableName, Dictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id, bool returnNullIfNotFound = false)
     {
+        var defaultValue = returnNullIfNotFound ? null : id;
         if (id is null or 0)
         {
-            return id;
+            return defaultValue;
         }
 
         if (!idMapping.TryGetValue(tableName, out var tableIdMapping))
         {
-            return id;
+            return defaultValue;
         }
 
-        return !tableIdMapping.TryGetValue(id.Value, out var mappedId) ? id : mappedId;
+        return tableIdMapping.TryGetValue(id.Value, out var mappedId) ? mappedId : defaultValue;
     }
 
     /// <summary>
@@ -3057,13 +2986,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="destinationId">The ID of the destination item.</param>
     /// <param name="linkType">The link type number.</param>
     /// <param name="mySqlConnection">The connection to the database.</param>
-    /// <param name="wiserItemsService">An instance of the <see cref="IWiserItemsService"/>.</param>
+    /// <param name="branchEntityTypesService">An instance of the <see cref="IEntityTypesService"/> with a database connection to the branch database.</param>
     /// <param name="allLinkTypeSettings">The list with all link type settings.</param>
     /// <param name="allEntityTypeSettings">The dictionary with settings for each entity type. This function will add items to this dictionary if they don't exist yet.</param>
     /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
-    private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
+    private static async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IEntityTypesService branchEntityTypesService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
     {
         var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType);
+
         await using var command = mySqlConnection.CreateCommand();
         command.Parameters.AddWithValue("sourceId", sourceId);
         command.Parameters.AddWithValue("destinationId", destinationId);
@@ -3074,19 +3004,19 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // Get settings entity settings from cache if we have them, otherwise get them from database and add to cache.
             if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var sourceEntityTypeSettings))
             {
-                sourceEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
+                sourceEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.SourceEntityType, sourceEntityTypeSettings);
             }
 
-            if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var destinationEntityTypeSettings))
+            if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.DestinationEntityType, out var destinationEntityTypeSettings))
             {
-                destinationEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
+                destinationEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.DestinationEntityType, destinationEntityTypeSettings);
             }
 
             // Get the table prefixes we need from the entity settings.
-            var sourceTablePrefix = wiserItemsService.GetTablePrefixForEntity(sourceEntityTypeSettings);
-            var destinationTablePrefix = wiserItemsService.GetTablePrefixForEntity(destinationEntityTypeSettings);
+            var sourceTablePrefix = branchEntityTypesService.GetTablePrefixForEntity(sourceEntityTypeSettings);
+            var destinationTablePrefix = branchEntityTypesService.GetTablePrefixForEntity(destinationEntityTypeSettings);
 
             // Check if the source item exists in this table.
             command.CommandText = $"""
@@ -3133,7 +3063,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="productionConnection">The connection to the production database.</param>
     /// <param name="environmentConnection">The connection to the environment database.</param>
     /// <returns>The new ID that should be used for the first new item to be inserted into this table.</returns>
-    private async Task<ulong> GenerateNewIdAsync(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
+    private static async Task<ulong> GenerateNewIdAsync(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
     {
         await using var productionCommand = productionConnection.CreateCommand();
         await using var environmentCommand = environmentConnection.CreateCommand();
@@ -3151,12 +3081,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// Add an ID mapping, to map the ID of the environment database to the same item with a different ID in the production database.
     /// </summary>
     /// <param name="idMappings">The dictionary that contains the in-memory mappings.</param>
+    /// <param name="idMappingsAddedInCurrentMerge">The list of id mappings that were added in the current merge.</param>
     /// <param name="tableName">The table that the ID belongs to.</param>
     /// <param name="originalItemId">The ID of the item in the selected environment.</param>
     /// <param name="newItemId">The ID of the item in the production environment.</param>
     /// <param name="environmentConnection">The database connection to the selected environment.</param>
-    /// <param name="productionConnection"></param>
-    private async Task AddIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection, MySqlConnection productionConnection)
+    /// <param name="productionConnection">The database connection to the production environment.</param>
+    private static async Task AddIdMappingAsync(Dictionary<string, Dictionary<ulong, ulong>> idMappings, Dictionary<string, Dictionary<ulong, ulong>> idMappingsAddedInCurrentMerge, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection, MySqlConnection productionConnection)
     {
         if (!idMappings.TryGetValue(tableName, out var tableIdMappings))
         {
@@ -3207,6 +3138,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
         environmentCommand.Parameters.AddWithValue("productionId", newItemId);
         await environmentCommand.ExecuteNonQueryAsync();
+
+        // Add the mapping to the list of mappings that were added in the current merge, so that we can do some checks/logging with that later.
+        if (!idMappingsAddedInCurrentMerge.TryGetValue(tableName, out tableIdMappings))
+        {
+            tableIdMappings = new Dictionary<ulong, ulong>();
+            idMappingsAddedInCurrentMerge.Add(tableName, tableIdMappings);
+        }
+
+        // Ignore the result from TryAdd, because we don't need to do anything if it already exists.
+        _ = tableIdMappings.TryAdd(originalItemId, newItemId);
     }
 
     /// <summary>
